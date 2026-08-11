@@ -27,6 +27,7 @@ export default function App() {
   const [settings, setSettings] = useState<SettingsState>(DEFAULT_SETTINGS);
   const [error, setError] = useState('');
   const [generating, setGenerating] = useState(false);
+  const [fixNotice, setFixNotice] = useState('');
 
   // 统一生成配置：穿透阈值 / 合并阈值 / 页面尺寸 / 最小字号
   const generateConfig: GenerateConfig = {
@@ -161,6 +162,21 @@ export default function App() {
     }
   }
 
+  // 一键修复布局：切换为最稳健的布局参数（自动合并低比例股东、允许第一层合并、页面自动、银行标准版式）
+  function handleFixLayout() {
+    setSettings((s) => ({
+      ...s,
+      autoMerge: true,
+      mergeStartLevel: 1,
+      mergeRatio: Math.min(s.mergeRatio, 10),
+      pageMode: 'auto',
+      layoutMode: 'bank-standard',
+    }));
+    setFixNotice(
+      '已自动调整布局参数：开启自动合并、合并起始层级=1、合并阈值≤10%、页面自动、版式=银行标准；如仍有重叠，请尝试减少股东数量或拆分展示',
+    );
+  }
+
   const parseInfo = parsed ? (
     <div className="parse-info">
       <span>
@@ -247,6 +263,8 @@ export default function App() {
                 check={layoutCheck}
                 mergedGroups={fit.mergedGroups}
                 onDownload={handleDownload}
+                onFix={handleFixLayout}
+                fixNotice={fixNotice}
                 generating={generating}
               />
             )}

@@ -11,6 +11,8 @@ interface Props {
   check: CollisionReport | null;
   mergedGroups: number;
   onDownload: () => void;
+  onFix?: () => void;
+  fixNotice?: string;
   generating: boolean;
 }
 
@@ -23,6 +25,8 @@ export default function ChartPreview({
   check,
   mergedGroups,
   onDownload,
+  onFix,
+  fixNotice,
   generating,
 }: Props) {
   const level1 = tree.nodes.filter((n) => n.level === 1).length;
@@ -54,6 +58,15 @@ export default function ChartPreview({
         <span className={ok ? 'ok' : 'warn'}>{ok ? '布局检测：无重叠' : '布局检测：存在重叠，请调整设置'}</span>
       </div>
       {mergedGroups > 0 && <p className="banner">已合并 {mergedGroups} 组低比例股东以适配版面</p>}
+      {!ok && onFix && (
+        <div className="fix-row">
+          <span className="warn">布局存在重叠，可一键调整为最优设置（自动合并低比例股东 + 适配页面）</span>
+          <button type="button" className="btn primary" onClick={onFix}>
+            一键修复布局
+          </button>
+        </div>
+      )}
+      {fixNotice && <p className="banner">{fixNotice}</p>}
       <div className="chart-box">
         <div className="chart-svg" dangerouslySetInnerHTML={{ __html: svg }} />
       </div>
