@@ -1,6 +1,7 @@
 import type {
   EquityRelation,
   EquityTree,
+  GraphEdge,
   PenetrateOptions,
   StopReason,
   TreeEdge,
@@ -8,6 +9,7 @@ import type {
 } from '../types';
 import { formatNum, formatRatio } from '../excel/ratio';
 import { inferRegPlace, isLikelyNaturalPerson, isLikelyOverseas } from './classify';
+import { aggregateOwnership, buildEquityGraph } from './equityGraph';
 
 export function stopTag(): string | undefined {
   // 文本框内仅显示持股主体名称，不再显示自然人/境外等标签
@@ -21,14 +23,19 @@ export function buildEquityTree(
   opts: PenetrateOptions,
 ): EquityTree {
   const precision = opts.ratioPrecision ?? 2;
-  const incoming = new Map<string, EquityRelation[]>();
-  for (const r of relations) {
-    if (!r.investor || !r.investee) continue;
-    const list = incoming.get(r.investee);
-    if (list) list.push(r);
-    else incoming.set(r.investee, [r]);
+  // 计算引擎底层：先构建 Node + Edge 的 EquityGraph，穿透与综合持股计算均基于该图
+  const graph = buildEquityGraph(relations, entityTypes, targetName);
+  const graphNodeById = new Map(graph.nodes.map((n) => [n.id, n]));
+  const graphNodeByName = new Map(graph.nodes.map((n) => [n.name, n]));
+  // 入边邻接（按被投资方名称），供展示树（EquityTree 投影）遍历
+  const incomingByName = new Map<string, GraphEdge[]>();
+  for (const e of graph.edges) {
+    const name = graphNodeById.get(e.toId)!.name;
+    const list = incomingByName.get(name);
+    if (list) list.push(e);
+    else incomingByName.set(name, [e]);
   }
-  for (const list of incoming.values()) {
+  for (const list of incomingByName.values()) {
     list.sort((a, b) => (b.ratio ?? -1) - (a.ratio ?? -1));
   }
 
@@ -37,9 +44,9 @@ export function buildEquityTree(
   const nodeOf = new Map<string, TreeNode>();
   const nodeByName = new Map<string, string>(); // 主体名称 -> 节点 id（重复股东去重）
   const edgeKey = new Set<string>(); // "from\0to" 已建立的边
-  let counter = 0;
+  let counter = graph.nodes.length;
 
-  const rootId = `n${counter++}`;
+  const rootId = graphNodeByName.get(targetName)!.id;
   const root: TreeNode = {
     id: rootId,
     name: targetName,
@@ -71,12 +78,13 @@ export function buildEquityTree(
     const cur = queue.shift()!;
     const curNode = nodeOf.get(cur.id)!;
     const canExpand = curNode.stopReason === 'expanded' && curNode.level < opts.maxLevel;
-    const children = canExpand ? (incoming.get(cur.name) ?? []) : [];
+    const children = canExpand ? (incomingByName.get(cur.name) ?? []) : [];
     const seenChild = new Set<string>();
 
     for (const rel of children) {
-      const investor = rel.investor.trim();
-      if (!investor || investor === '-' || investor === cur.name) continue;
+      const investor = graphNodeById.get(rel.fromId)!.name;
+      const investorType = graphNodeById.get(rel.fromId)!.entityType;
+      if (investor === '-' || investor === cur.name) continue;
       if (cur.ancestors.has(investor)) {
         skippedByCycle++;
         continue;
@@ -94,8 +102,8 @@ export function buildEquityTree(
       const display = curNode.isTarget ? true : deep ? true : !below || opts.showBelowThreshold;
       if (!display) continue;
 
-      const isPerson = opts.stopAtNaturalPerson && isLikelyNaturalPerson(investor, entityTypes[investor]);
-      const isOverseas = opts.stopAtOverseas && isLikelyOverseas(investor, entityTypes[investor]);
+      const isPerson = opts.stopAtNaturalPerson && isLikelyNaturalPerson(investor, investorType);
+      const isOverseas = opts.stopAtOverseas && isLikelyOverseas(investor, investorType);
 
       let reason: StopReason;
       if (isPerson) reason = 'natural-person';
@@ -104,8 +112,8 @@ export function buildEquityTree(
       else if (!deep) reason = 'below-threshold';
       else reason = 'expanded';
 
-      const hasShareholders = (incoming.get(investor) ?? []).some(
-        (r) => r.investor.trim() && r.investor.trim() !== investor && r.investor.trim() !== '-',
+      const hasShareholders = (incomingByName.get(investor) ?? []).some(
+        (e) => graphNodeById.get(e.fromId)!.name !== investor,
       );
       if (reason === 'expanded' && !hasShareholders) reason = 'no-shareholders';
 
@@ -128,7 +136,8 @@ export function buildEquityTree(
         continue;
       }
 
-      const childId = `n${counter++}`;
+      // 展示树节点直接复用底层 EquityGraph 的节点 id，保证图算法（综合持股等）可按 id 计算
+      const childId = graphNodeByName.get(investor)!.id;
       const child: TreeNode = {
         id: childId,
         name: investor,
@@ -186,32 +195,13 @@ export function buildEquityTree(
   // —— 受益所有人识别：综合持股 = 自然人股东经全部持股路径对目标企业的持股之和 ——
   // 综合持股 > 阈值（默认 25%）的自然人即受益所有人；持股路径 ≤ 3 层时画出完整路径，
   // 超过 3 层时折叠为单个节点直接显示综合持股比例，避免深链影响图面可读性
-  const aggMemo = new Map<string, number | null>();
-  const aggregateOf = (id: string, visiting: Set<string>): number | null => {
-    if (id === rootId) return 100;
-    const cached = aggMemo.get(id);
-    if (cached !== undefined) return cached;
-    if (visiting.has(id)) return null;
-    visiting.add(id);
-    let sum = 0;
-    let anyKnown = false;
-    for (const e of edges) {
-      if (e.fromId !== id || e.ratio === null) continue;
-      const parentAgg = aggregateOf(e.toId, visiting);
-      if (parentAgg === null) continue;
-      anyKnown = true;
-      sum += (e.ratio * parentAgg) / 100;
-    }
-    visiting.delete(id);
-    const result = anyKnown ? sum : null;
-    aggMemo.set(id, result);
-    return result;
-  };
+  // 综合持股计算基于底层 EquityGraph（全部持股边，含多路径），而非展示树
+  const aggregateOf = (id: string) => aggregateOwnership(graph, id, rootId);
 
   const beneficialIds: string[] = [];
-  for (const n of nodes) {
+    for (const n of nodes) {
     if (n.stopReason !== 'natural-person') continue;
-    const agg = aggregateOf(n.id, new Set());
+    const agg = aggregateOf(n.id);
     if (agg !== null && agg > opts.threshold) beneficialIds.push(n.id);
   }
 
@@ -219,7 +209,7 @@ export function buildEquityTree(
     const removed = new Set<string>();
     for (const pid of beneficialIds) {
       const p = nodeOf.get(pid)!;
-      const agg = aggregateOf(pid, new Set())!;
+      const agg = aggregateOf(pid)!;
       if (p.level <= 3) {
         warnings.push(`识别到受益所有人：${p.name}（综合持股${formatNum(agg, precision)}%）`);
         continue;

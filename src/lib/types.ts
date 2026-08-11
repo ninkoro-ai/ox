@@ -75,6 +75,31 @@ export interface TreeEdge {
   label: string;
 }
 
+// ── 图模型（股权计算引擎底层数据模型）──────────────────────────
+// 底层统一使用 Node + Edge 的 EquityGraph，支撑交叉持股、多路径持股、
+// 最终受益人与综合持股比例计算；展示层（EquityTree）仅是它的投影。
+
+export interface GraphNode {
+  id: string;
+  name: string;
+  /** 实体类型（自然人/企业/境外等），来自投资方类型/企业类型 */
+  entityType?: string;
+}
+
+export interface GraphEdge {
+  fromId: string; // 投资方节点
+  toId: string; // 被投资方节点
+  ratio: number | null;
+  remark?: string;
+  source?: string;
+}
+
+export interface EquityGraph {
+  targetName: string; // 目标企业（授信主体）
+  nodes: GraphNode[];
+  edges: GraphEdge[];
+}
+
 export interface EquityTree {
   targetName: string;
   nodes: TreeNode[];
