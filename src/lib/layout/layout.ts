@@ -18,6 +18,7 @@ export interface LayoutConfig {
   margin: { top: number; bottom: number; left: number; right: number };
   showRegPlace?: boolean; // 是否在文本框内展示注册地
   zoneSplit?: boolean; // 境内外分区布局（境外在上、虚线分隔、境内在下）
+  verticalNames?: boolean; // 横向放不下时：公司名称纵向排版（一字一行）压缩宽度
 }
 
 export const DEFAULT_LAYOUT_CONFIG: LayoutConfig = {
@@ -26,6 +27,7 @@ export const DEFAULT_LAYOUT_CONFIG: LayoutConfig = {
   margin: { top: 40, bottom: 40, left: 50, right: 50 },
   showRegPlace: true,
   zoneSplit: true,
+  verticalNames: false,
 };
 
 export function layoutTree(
@@ -34,6 +36,8 @@ export function layoutTree(
   depth = 0,
 ): LayoutResult {
   const showRegPlace = cfg.showRegPlace ?? true;
+  const verticalNames = cfg.verticalNames ?? false;
+  const regForSize = showRegPlace && !verticalNames;
   const root = tree.nodes.find((n) => n.isTarget);
   if (!root) throw new Error('树中缺少目标企业节点');
 
@@ -57,16 +61,18 @@ export function layoutTree(
   const nodeOf = new Map<string, TreeNode>(tree.nodes.map((n) => [n.id, n]));
   const sizes = new Map<string, { w: number; h: number; lines: string[] }>();
   for (const n of tree.nodes) {
-    sizes.set(n.id, nodeSize(n.name, showRegPlace ? n.regPlace : undefined, n.tag));
+    sizes.set(n.id, nodeSize(n.name, regForSize ? n.regPlace : undefined, n.tag));
   }
 
   // 同一层股东等宽分布：以本层最大自然宽度统一文本框宽度，名称尽量显示在一行；
   // 高度统一为本层最大高度，保证同层文本框大小一致
   for (const ids of levelIds) {
-    const targetW = Math.max(...ids.map((id) => sizes.get(id)!.w));
+    const targetW = verticalNames
+      ? Math.min(Math.max(...ids.map((id) => sizes.get(id)!.w)), VERTICAL_NAME_W)
+      : Math.max(...ids.map((id) => sizes.get(id)!.w));
     const remeasured = ids.map((id) => {
       const n = nodeOf.get(id)!;
-      return nodeSizeForWidth(n.name, showRegPlace ? n.regPlace : undefined, n.tag, targetW);
+      return nodeSizeForWidth(n.name, regForSize ? n.regPlace : undefined, n.tag, targetW);
     });
     const targetH = Math.max(...remeasured.map((s) => s.h));
     ids.forEach((id, i) => {
@@ -141,7 +147,7 @@ export function layoutTree(
       ratioText: n.ratioText,
       stopReason: n.stopReason,
       tag: n.tag,
-      regPlace: showRegPlace ? n.regPlace : undefined,
+      regPlace: regForSize ? n.regPlace : undefined,
       isTarget: n.isTarget,
       isMerged: n.isMerged,
     });
@@ -239,36 +245,19 @@ export function layoutTree(
         kind: 'drop',
       });
     });
-    if (to.isTarget) {
-      // 最终汇总到目标主体时只保留一个箭头：总线末端的唯一竖直段带箭头
-      const cx = to.x + to.w / 2;
-      minX = Math.min(minX, cx);
-      maxX = Math.max(maxX, cx);
-      segments.push({
-        x1: cx,
-        y1: busY,
-        x2: cx,
-        y2: to.y,
-        arrow: true,
-        edgeId: to.id,
-        kind: 'entry',
-      });
-    } else {
-      froms.forEach((f, i) => {
-      const cx = to.x + ((i + 1) * to.w) / (froms.length + 1);
-      minX = Math.min(minX, cx);
-      maxX = Math.max(maxX, cx);
-      segments.push({
-        x1: cx,
-        y1: busY,
-        x2: cx,
-        y2: to.y,
-        arrow: true,
-        edgeId: f.id,
-        kind: 'entry',
-      });
-      });
-    }
+    // 各层级展示规范一致：多股东汇聚到任一被投资企业时，总线末端只保留一个箭头
+    const cx = to.x + to.w / 2;
+    minX = Math.min(minX, cx);
+    maxX = Math.max(maxX, cx);
+    segments.push({
+      x1: cx,
+      y1: busY,
+      x2: cx,
+      y2: to.y,
+      arrow: true,
+      edgeId: to.id,
+      kind: 'entry',
+    });
     segments.push({
       x1: minX,
       y1: busY,
@@ -383,6 +372,7 @@ function applyZoneSplit(nodes: LayoutNode[], cfg: LayoutConfig): boolean {
 export type RatioLabelSideMode = 'both' | 'right';
 
 const LABEL_GAP = 6; // 比例标签与连接线的水平间距
+const VERTICAL_NAME_W = 34; // 纵向排版时文本框宽度（约一个字宽）
 const BOUNDARY_PAD = 26; // 分隔线与境外节点底部的间距（含“境外”标签）
 const BOUNDARY_MIN_PAD = 16; // 境外节点底部到虚线的最小间距
 const BOUNDARY_LABEL_H = 14; // “境外/境内”标签高度

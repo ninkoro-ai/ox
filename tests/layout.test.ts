@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { EquityRelation } from '../src/lib/types';
 import { buildEquityTree } from '../src/lib/graph/penetrate';
 import { checkLayout } from '../src/lib/layout/collision';
-import { fitLayout } from '../src/lib/layout/page';
+import { fitLayout, PAGES } from '../src/lib/layout/page';
 
 const OPTS = {
   threshold: 25,
@@ -167,5 +167,26 @@ describe('布局引擎', () => {
     expect(report.segmentCrossings).toBe(0);
     expect(report.labelNodeHits).toBe(0);
     expect(report.labelSegmentHits).toBe(0);
+  });
+
+  it('横向放不下时自动采用纵向文本框排布，且不超出页面范围', () => {
+    const relations: EquityRelation[] = [];
+    for (let i = 1; i <= 12; i++) {
+      relations.push({ investor: `深圳市某大型股权投资企业（有限合伙）${i}号`, investee: '目标公司', ratio: 5 + i });
+    }
+    const tree = makeTree(relations);
+    const fit = fitLayout(tree, {
+      pageMode: 'auto',
+      mergeRatio: 25,
+      autoMerge: false,
+      showRegPlace: true,
+      mergeBelow: false,
+      ratioPrecision: 2,
+    });
+    const page = PAGES[fit.page];
+    expect(fit.layout.width * fit.pxToIn).toBeLessThanOrEqual(page.wIn + 0.01);
+    expect(fit.layout.height * fit.pxToIn).toBeLessThanOrEqual(page.hIn + 0.01);
+    const long = fit.layout.nodes.find((n) => n.name.includes('大型股权投资'))!;
+    expect(long.lines.length).toBeGreaterThanOrEqual([...long.name].length - 1);
   });
 });

@@ -177,8 +177,15 @@ export function fitLayout(tree: EquityTree, opts: FitOptions): FitResult {
     }
   }
 
-  const tryPage = (t: EquityTree): { page: PageKey; layout: LayoutResult; scale: number } | null => {
-    const layout = layoutTree(t, { ...DEFAULT_LAYOUT_CONFIG, showRegPlace: opts.showRegPlace });
+  const tryPage = (
+    t: EquityTree,
+    verticalNames = false,
+  ): { page: PageKey; layout: LayoutResult; scale: number } | null => {
+    const layout = layoutTree(t, {
+      ...DEFAULT_LAYOUT_CONFIG,
+      showRegPlace: opts.showRegPlace,
+      verticalNames,
+    });
     if (opts.pageMode === 'auto') {
       // 简单结构优先 A4（约半张 A4 的紧凑版面），放不下再依次尝试 16:9、A3
       for (const page of ['a4', '16x9', 'a3'] as PageKey[]) {
@@ -206,25 +213,35 @@ export function fitLayout(tree: EquityTree, opts: FitOptions): FitResult {
     mergedGroups += res.groups;
   }
 
+  // 横向排布放不下时，改用纵向文本框（名称一字一行）压缩宽度，尽量保持在页内
+  if (!chosen) {
+    const verticalHit = tryPage(current, true);
+    if (verticalHit) chosen = verticalHit;
+  }
   if (!chosen) {
     const page: PageKey = opts.pageMode === 'auto' ? 'a3' : opts.pageMode;
-    const layout = layoutTree(current, { ...DEFAULT_LAYOUT_CONFIG, showRegPlace: opts.showRegPlace });
-    const s = Math.max(scaleFor(page, layout), MIN_ALLOWED);
-    chosen = { page, layout, scale: s };
+    const layout = layoutTree(current, {
+      ...DEFAULT_LAYOUT_CONFIG,
+      showRegPlace: opts.showRegPlace,
+      verticalNames: true,
+    });
+    chosen = { page, layout, scale: scaleFor(page, layout) };
   }
 
   // 比例标签：A4（紧凑）统一右侧，16:9 / A3 左右交替
   const layout = attachRatioLabels(chosen.layout, chosen.page === 'a4' ? 'right' : 'both');
   const page = chosen.page;
-  const s = clampScale(Math.max(scaleFor(page, layout), MIN_ALLOWED));
-  if (s <= MIN_ALLOWED + 0.01) {
-    warnings.push('内容较多，图表已按最小可读尺寸缩放；建议调低合并阈值或拆分展示');
+  // 最终缩放：可读时按上限放大，放不下时绝不超出页面范围
+  const fitScale = scaleFor(page, layout);
+  const s = Math.min(clampScale(fitScale), fitScale);
+  if (fitScale < MIN_ALLOWED) {
+    warnings.push('内容较多，已采用纵向文本框排布以适配页面；建议调低合并阈值或拆分展示');
   }
   return {
     tree: current,
     layout,
     page,
-    pxToIn: clampScale(s),
+    pxToIn: s,
     mergedGroups,
     warnings,
   };
