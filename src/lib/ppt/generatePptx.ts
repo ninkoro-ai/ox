@@ -106,78 +106,53 @@ export async function generatePptx(
     slide.addShape(pptx.ShapeType.line as never, lineOpts);
   }
 
-  // 公司节点：Shape + 名称 TextBox + 比例 TextBox + 停止标签
-  const nodeById = new Map(opts.layout.nodes.map((n) => [n.id, n]));
+  // 公司节点：单个带边框的文本框（名称/注册地内嵌），拖动文本框时文字跟随
   for (const n of opts.layout.nodes) {
     const x = toX(n.x);
     const y = toY(n.y);
     const w = toIn(n.w);
     const h = toIn(n.h);
-    const shapeOpts: Record<string, unknown> = {
+    const runs: PptxGenJS.TextProps[] = [
+      {
+        text: n.lines.join('\n'),
+        options: {
+          fontSize: toPt(13),
+          bold: n.isTarget,
+          color: NODE_TEXT,
+          fontFace: 'Microsoft YaHei',
+        },
+      },
+    ];
+    if (n.regPlace) {
+      runs.push({
+        text: `${REG_PREFIX}${n.regPlace}`,
+        options: {
+          fontSize: toPt(10),
+          color: NODE_TEXT,
+          fontFace: 'Microsoft YaHei',
+          breakLine: true,
+        },
+      });
+    }
+    slide.addText(runs, {
       x,
       y,
       w,
       h,
+      shape: 'roundRect',
       rectRadius: 0.06,
       line: {
         color: NODE_BORDER,
         width: n.isTarget ? 1.6 : 1.1,
         dashType: 'solid',
       },
-    };
-    slide.addShape(pptx.ShapeType.roundRect as never, shapeOpts);
-
-    // 名称 + 注册地 + 标签整体在文本框内上下居中
-    const nameH = toIn(n.lines.length * 17);
-    const regH = n.regPlace ? toIn(13) : 0;
-    const tagH = n.tag ? toIn(12) : 0;
-    const contentH = nameH + regH + tagH;
-    let ty = y + Math.max(0, (h - contentH) / 2);
-    slide.addText(n.lines.join('\n'), {
-      x: x + toIn(4),
-      y: ty,
-      w: w - toIn(8),
-      h: nameH,
-      fontSize: toPt(13),
-      bold: n.isTarget,
-      color: NODE_TEXT,
       align: 'center',
       valign: 'middle',
       fontFace: 'Microsoft YaHei',
+      margin: 0,
+      wrap: true,
       lineSpacingMultiple: 1.0,
     });
-
-    ty += nameH;
-    if (n.regPlace) {
-      slide.addText(`${REG_PREFIX}${n.regPlace}`, {
-        x,
-        y: ty,
-        w,
-        h: regH,
-        fontSize: toPt(10),
-        color: NODE_TEXT,
-        align: 'center',
-        valign: 'middle',
-        fontFace: 'Microsoft YaHei',
-        margin: 0,
-        wrap: false,
-      });
-      ty += regH;
-    }
-    if (n.tag) {
-      slide.addText(n.tag, {
-        x,
-        y: ty,
-        w,
-        h: tagH,
-        fontSize: toPt(9),
-        color: TAG_TEXT,
-        align: 'center',
-        valign: 'middle',
-        fontFace: 'Microsoft YaHei',
-      });
-      ty += tagH;
-    }
   }
 
   // 持股比例：独立于文本框，位于连接线两侧

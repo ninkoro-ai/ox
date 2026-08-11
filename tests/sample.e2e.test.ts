@@ -114,6 +114,11 @@ describe.skipIf(!findSample())('真实工商 Excel 全流程验收', () => {
     expect(slideXml).toContain('注册地：香港');
     expect(slideXml).toContain('注册地：中国');
     expect(slideXml).not.toContain('未穿透');
+    // 公司节点为单个带边框文本框：所有圆角矩形均内嵌文字，无独立空形状
+    const sps = slideXml.split('<p:sp>').slice(1);
+    const roundRects = sps.filter((sp) => sp.includes('prstGeom prst="roundRect"'));
+    expect(roundRects.length).toBeGreaterThanOrEqual(6);
+    expect(roundRects.every((sp) => sp.includes('<p:txBody>'))).toBe(true);
     const relsXml = await zip.file('ppt/slides/_rels/slide1.xml.rels')!.async('text');
     expect(relsXml).not.toContain('image'); // 禁止图片插入
   }, 180000);
