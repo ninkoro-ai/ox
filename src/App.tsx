@@ -8,6 +8,7 @@ import { fitLayout } from './lib/layout/page';
 import { checkLayout } from './lib/layout/collision';
 import { renderChartSvg } from './lib/preview/svg';
 import { DEFAULT_GENERATE_CONFIG, type GenerateConfig, type ParsedResult } from './lib/types';
+import qxbTutorial from './assets/qxb.png';
 
 function saveBlob(blob: Blob, filename: string) {
   const url = URL.createObjectURL(blob);
@@ -202,6 +203,16 @@ export default function App() {
           <p className="upload-hint">
             没有工商数据？下载标准模板，按“投资方 → 被投资方”逐行录入持股边，再上传即可生成标准授信股权结构 PPT。
           </p>
+          <details className="tutorial">
+            <summary>如何从启信宝 APP 导出 Excel？</summary>
+            <figure className="tutorial-body">
+              <img src={qxbTutorial} alt="启信宝 APP 导出 Excel 教程" loading="lazy" />
+              <figcaption>
+                按图示在启信宝 APP 中打开目标企业 → 进入“股权结构/股东信息”页 → 选择导出 Excel，
+                将文件上传到本页即可自动生成股权穿透结构图。
+              </figcaption>
+            </figure>
+          </details>
           {parseInfo}
           {error && <p className="error">{error}</p>}
         </section>
