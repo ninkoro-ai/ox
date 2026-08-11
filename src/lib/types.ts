@@ -9,9 +9,18 @@ export interface EquityRelation {
   sourceSheet?: string;
   investorType?: string;
   investeeType?: string;
+  remark?: string; // 人工录入模板的备注列
 }
 
-export type SheetFormat = 'structured-levels' | 'generic-table';
+export type SheetFormat = 'structured-levels' | 'generic-table' | 'manual-template';
+
+/** 主体信息（人工录入模板预留：未来集团授信图使用） */
+export interface EntityProfile {
+  name: string;
+  industry?: string;
+  sector?: string;
+  isCreditSubject?: boolean;
+}
 
 export interface ParsedResult {
   targetName: string | null;
@@ -20,6 +29,7 @@ export interface ParsedResult {
   format: SheetFormat;
   warnings: string[];
   entityTypes: Record<string, string>; // 企业名称 -> 企业类型
+  entityProfiles?: EntityProfile[]; // 人工录入模板“主体信息”页
   columnMap?: {
     investor: string;
     investee: string;

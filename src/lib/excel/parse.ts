@@ -1,5 +1,5 @@
 import * as XLSX from 'xlsx';
-import type { EquityRelation, ParsedResult, SheetFormat } from '../types';
+import type { EntityProfile, EquityRelation, ParsedResult, SheetFormat } from '../types';
 import { detectColumnMapping, scoreHeader, INVESTOR_KEYS, INVESTEE_KEYS, RATIO_KEYS, LEVEL_KEYS } from './columns';
 import { parseRatio } from './ratio';
 
@@ -254,6 +254,93 @@ function parseGenericSheet(
   return { sheet: '', ok: count > 0 };
 }
 
+/** 解析人工录入模板的“股权关系”页（边关系设计） */
+function parseManualEdgeSheet(
+  sheet: XLSX.WorkSheet,
+  relations: EquityRelation[],
+  entityTypes: Record<string, string>,
+  warnings: string[],
+): void {
+  const rows = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, defval: '' });
+  let headerIdx = -1;
+  for (let i = 0; i < Math.min(rows.length, 20); i++) {
+    const row = rows[i];
+    if (row.some((c) => clean(c).includes('投资方名称')) && row.some((c) => clean(c).includes('被投资方'))) {
+      headerIdx = i;
+      break;
+    }
+  }
+  if (headerIdx < 0) {
+    warnings.push('“股权关系”页未找到表头（投资方名称/被投资方名称），请使用标准模板');
+    return;
+  }
+  const header = rows[headerIdx];
+  const colOf = (kw: string) => header.findIndex((c) => clean(c).includes(kw));
+  const iInv = colOf('投资方名称');
+  const iType = colOf('投资方类型');
+  const iInv2 = colOf('被投资方名称');
+  const iRatio = colOf('持股比例');
+  const iLevel = colOf('层级');
+  const iRemark = colOf('备注');
+  if (iInv < 0 || iInv2 < 0 || iRatio < 0) {
+    warnings.push('“股权关系”页缺少必需列（投资方名称/被投资方名称/持股比例），请使用标准模板');
+    return;
+  }
+  let count = 0;
+  for (let i = headerIdx + 1; i < rows.length; i++) {
+    const row = rows[i];
+    const investor = clean(row[iInv]);
+    const investee = clean(row[iInv2]);
+    if (!investor || !investee || investor === '-') continue;
+    const type = iType >= 0 ? clean(row[iType]) : '';
+    if (type) entityTypes[investor] = type;
+    relations.push({
+      investor,
+      investee,
+      ratio: parseRatio(row[iRatio]),
+      level: iLevel >= 0 ? parseLevelValue(row[iLevel]) ?? undefined : undefined,
+      investorType: type || undefined,
+      remark: iRemark >= 0 ? clean(row[iRemark]) || undefined : undefined,
+    });
+    count++;
+  }
+  if (count === 0) warnings.push('“股权关系”页未读取到有效数据行');
+}
+
+/** 解析人工录入模板的“主体信息”页（预留集团授信图使用） */
+function parseInfoSheet(sheet: XLSX.WorkSheet | undefined): EntityProfile[] {
+  if (!sheet) return [];
+  const rows = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, defval: '' });
+  let headerIdx = -1;
+  for (let i = 0; i < Math.min(rows.length, 20); i++) {
+    if (rows[i].some((c) => clean(c).includes('公司名称'))) {
+      headerIdx = i;
+      break;
+    }
+  }
+  if (headerIdx < 0) return [];
+  const header = rows[headerIdx];
+  const colOf = (kw: string) => header.findIndex((c) => clean(c).includes(kw));
+  const iName = colOf('公司名称');
+  const iInd = colOf('行业');
+  const iSec = colOf('业务板块');
+  const iCredit = colOf('是否授信主体');
+  if (iName < 0) return [];
+  const profiles: EntityProfile[] = [];
+  for (let i = headerIdx + 1; i < rows.length; i++) {
+    const row = rows[i];
+    const name = clean(row[iName]);
+    if (!name) continue;
+    profiles.push({
+      name,
+      industry: iInd >= 0 ? clean(row[iInd]) || undefined : undefined,
+      sector: iSec >= 0 ? clean(row[iSec]) || undefined : undefined,
+      isCreditSubject: iCredit >= 0 ? clean(row[iCredit]).startsWith('是') : undefined,
+    });
+  }
+  return profiles;
+}
+
 function detectTarget(
   wb: XLSX.WorkBook,
   relations: EquityRelation[],
@@ -316,6 +403,9 @@ export function parseWorkbook(wb: XLSX.WorkBook): ParsedResult {
   const entityTypes: Record<string, string> = {};
   const targetCandidates: string[] = [];
   const sheetNames = wb.SheetNames.map((n) => n.trim());
+  // 人工录入模板识别：“股权关系/关系表/边关系”页
+  const manualEdgeSheet = sheetNames.find((n) => /股权关系|关系表|边关系/.test(n));
+  const infoSheetName = sheetNames.find((n) => /主体信息/.test(n));
 
   const levelSheets = sheetNames
     .map((name) => ({ name, ws: wb.Sheets[name], level: parseLevelFromSheetName(name) }))
@@ -323,7 +413,12 @@ export function parseWorkbook(wb: XLSX.WorkBook): ParsedResult {
     .sort((a, b) => a.level - b.level);
 
   let format: SheetFormat = 'generic-table';
-  if (levelSheets.length > 0) {
+  const entityProfiles: EntityProfile[] = [];
+  if (manualEdgeSheet) {
+    format = 'manual-template';
+    parseManualEdgeSheet(wb.Sheets[manualEdgeSheet], relations, entityTypes, warnings);
+    entityProfiles.push(...parseInfoSheet(wb.Sheets[infoSheetName ?? '']));
+  } else if (levelSheets.length > 0) {
     format = 'structured-levels';
     for (const s of levelSheets) {
       parseStructuredSheet(s.ws, s.level, relations, entityTypes, targetCandidates);
@@ -333,6 +428,7 @@ export function parseWorkbook(wb: XLSX.WorkBook): ParsedResult {
   const structuredNames = new Set(levelSheets.map((s) => s.name));
   for (const name of sheetNames) {
     if (structuredNames.has(name)) continue;
+    if (format === 'manual-template' && (name === manualEdgeSheet || name === infoSheetName)) continue;
     if (name === '概要' || name === '概览') continue;
     parseGenericSheet(wb.Sheets[name], relations, warnings, entityTypes);
   }
@@ -343,7 +439,32 @@ export function parseWorkbook(wb: XLSX.WorkBook): ParsedResult {
     warnings.push(`已合并 ${before - deduped.length} 条重复股权关系`);
   }
 
-  const targetName = detectTarget(wb, deduped, targetCandidates);
+  let targetName: string | null = null;
+  if (format === 'manual-template') {
+    // 目标企业：优先“主体信息”中标记为授信主体的公司；否则取只作为被投资方出现的公司
+    const credit = entityProfiles.find((p) => p.isCreditSubject);
+    if (credit) targetName = credit.name;
+    if (!targetName) {
+      const investors = new Set(deduped.map((r) => r.investor));
+      const freq = new Map<string, number>();
+      for (const r of deduped) {
+        if (investors.has(r.investee)) continue;
+        freq.set(r.investee, (freq.get(r.investee) ?? 0) + 1);
+      }
+      let best = '';
+      let bestN = 0;
+      for (const [k, v] of freq) {
+        if (v > bestN) {
+          best = k;
+          bestN = v;
+        }
+      }
+      targetName = best || null;
+    }
+    if (!targetName) warnings.push('未识别到授信主体/目标企业，请在“主体信息”页将目标企业标记为“是”');
+  } else {
+    targetName = detectTarget(wb, deduped, targetCandidates);
+  }
   if (deduped.length === 0) {
     warnings.push('未识别到任何股权关系，请检查文件是否为工商股权结构报告');
   }
@@ -358,5 +479,6 @@ export function parseWorkbook(wb: XLSX.WorkBook): ParsedResult {
     format,
     warnings,
     entityTypes,
+    entityProfiles: entityProfiles.length > 0 ? entityProfiles : undefined,
   };
 }

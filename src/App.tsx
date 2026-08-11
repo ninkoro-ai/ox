@@ -144,6 +144,22 @@ export default function App() {
     }
   }
 
+  async function handleDownloadTemplate() {
+    setError('');
+    try {
+      const { createManualTemplateWorkbook } = await import('./lib/excel/template');
+      const buf = createManualTemplateWorkbook();
+      saveBlob(
+        new Blob([buf], {
+          type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        }),
+        '股权结构录入模板.xlsx',
+      );
+    } catch (e) {
+      setError(`模板下载失败：${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+
   const parseInfo = parsed ? (
     <div className="parse-info">
       <span>
@@ -160,7 +176,11 @@ export default function App() {
       </span>
       <span>
         <b>格式：</b>
-        {parsed.format === 'structured-levels' ? '分层级工商报告' : '通用表格'}
+        {parsed.format === 'structured-levels'
+          ? '分层级工商报告'
+          : parsed.format === 'manual-template'
+            ? '人工录入模板'
+            : '通用表格'}
       </span>
     </div>
   ) : null;
@@ -176,6 +196,12 @@ export default function App() {
         <section className="card">
           <h3>① 上传 Excel</h3>
           <UploadZone onFile={handleFile} disabled={generating} />
+          <button type="button" className="btn" onClick={handleDownloadTemplate} disabled={generating}>
+            下载标准录入模板
+          </button>
+          <p className="upload-hint">
+            没有工商数据？下载标准模板，按“投资方 → 被投资方”逐行录入持股边，再上传即可生成标准授信股权结构 PPT。
+          </p>
           {parseInfo}
           {error && <p className="error">{error}</p>}
         </section>
