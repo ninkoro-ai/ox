@@ -240,11 +240,20 @@ export function fitLayout(tree: EquityTree, opts: FitOptions): FitResult {
   // 页面紧凑时由标签布局自动缩小字号并加大间距，确保不遮挡股权线
   const layout = attachRatioLabels(chosen.layout, 'both');
   const page = chosen.page;
-  // 最终缩放：常规情况下图表约占页面 4/5（线性约 89.4%）；
-  // 可读性优先——最终字号不得低于 fontMinSize（9pt），页面放不下时以字号下限为准并提示
+  // 最终缩放：
+  // - 常规模式：图表约占页面 4/5（线性约 89.4%），可读性优先——字号不得低于 fontMinSize；
+  // - 银行授信版式：整图适配页面（优先 A4、空间不足自动 A3），放不下时按页面缩放并提示
   const fitScale = scaleFor(page, layout);
-  const s = Math.max(Math.min(clampScale(fitScale) * 0.894, fitScale), minFontScale);
-  if (fitScale < minFontScale) {
+  const areaScale = Math.min(clampScale(fitScale) * 0.894, fitScale);
+  const s =
+    opts.layoutMode === 'bank-ownership'
+      ? Math.min(clampScale(fitScale), fitScale)
+      : Math.max(areaScale, minFontScale);
+  if (opts.layoutMode === 'bank-ownership') {
+    if (s < minFontScale) {
+      warnings.push('银行授信版式内容较密集，已按页面缩放完整放下，字号可能低于 9pt；建议减少股东数量或切换其他版式');
+    }
+  } else if (fitScale < minFontScale) {
     warnings.push(`内容较多，图表在 ${page.toUpperCase()} 上无法按 ${opts.fontMinSize ?? 9}pt 字号完整放下；已保持最小字号，建议减少股东数量或开启低比例合并/拆分展示`);
   }
   return {

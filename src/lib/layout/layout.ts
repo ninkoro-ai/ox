@@ -571,7 +571,8 @@ export function layoutBankOwnership(
   const nodeById = new Map(layoutNodes.map((n) => [n.id, n]));
   const nodeRects = layoutNodes.map((n) => ({ x: n.x, y: n.y, w: n.w, h: n.h }));
 
-  // 连线：每个投资关系独立连接（禁止大范围横向汇流线），箭头与比例均绑定 Edge
+  // 连线：单父节点独立直连（控股链保持纵向）；多股东汇聚时各股东下探到一条共享横线，
+  // 再由单一入口箭头进入被投资企业（避免每条股东线各画一条横向折线互相重叠）
   const segments: LayoutSegment[] = [];
   let laneCounter = 0;
   const nextLane = () => Math.min(8 + laneCounter++ * 8, 34);
@@ -588,17 +589,19 @@ export function layoutBankOwnership(
       .sort((a, b) => (b.ratio ?? -1) - (a.ratio ?? -1))
       .map((e) => nodeById.get(e.fromId))
       .filter((n): n is LayoutNode => Boolean(n));
-    ordered.forEach((f, idx) => {
+    const cx = to.x + to.w / 2;
+    const cy = to.y;
+
+    if (ordered.length === 1) {
+      const f = ordered[0];
       const sx = f.x + f.w / 2;
       const sy = f.y + f.h;
-      const cx = to.x + to.w / 2;
-      const cy = to.y;
       // 同层/逆向补充边：从投资方顶边引出，经左侧车道进入被投资企业顶边
       if (f.y + f.h > to.y + 1) {
         pushLanePath(segments, f, to, nextLane(), sx);
-        return;
+        continue;
       }
-      // 竖直引出线落点在被投资企业上边沿内且不穿框时直连，否则在目标上方做局部短折
+      // 落点在被投资企业上边沿内且不穿框时直连，否则做单条局部短折
       if (sx > to.x + 1 && sx < to.x + to.w - 1 && !crossesAny(sx, sy, sx, cy, nodeRects)) {
         segments.push({
           x1: sx,
@@ -611,13 +614,66 @@ export function layoutBankOwnership(
           kind: 'entry',
           control: f.control,
         });
-        return;
+        continue;
       }
-      // 局部肘接：各投资方的折线高度错开，避免互相重叠
-      const jogY = cy - 14 - (idx % 4) * 7;
+      const jogY = cy - 18;
       segments.push({ x1: sx, y1: sy, x2: sx, y2: jogY, arrow: false, edgeId: f.id, toId: to.id, kind: 'drop', control: f.control });
       segments.push({ x1: sx, y1: jogY, x2: cx, y2: jogY, arrow: false, edgeId: f.id, toId: to.id, kind: 'drop', control: f.control });
       segments.push({ x1: cx, y1: jogY, x2: cx, y2: cy, arrow: true, edgeId: f.id, toId: to.id, kind: 'entry', control: f.control });
+      continue;
+    }
+
+    // 多股东汇聚：各股东竖直下探到同一条共享横线，再经单一入口箭头进入被投资企业
+    const drops: Array<{ f: LayoutNode; sx: number; sy: number }> = [];
+    for (const f of ordered) {
+      if (f.y + f.h > to.y + 1) {
+        // 同层/逆向补充边仍走车道
+        pushLanePath(segments, f, to, nextLane(), f.x + f.w / 2);
+        continue;
+      }
+      const sx = f.x + f.w / 2;
+      const sy = f.y + f.h;
+      drops.push({ f, sx, sy });
+    }
+    if (drops.length === 0) continue;
+    const jogY = cy - 18;
+    for (const d of drops) {
+      segments.push({
+        x1: d.sx,
+        y1: d.sy,
+        x2: d.sx,
+        y2: jogY,
+        arrow: false,
+        edgeId: d.f.id,
+        toId: to.id,
+        kind: 'drop',
+        control: d.f.control,
+      });
+    }
+    const primary = drops[0].f; // 持股比例最大的股东（已按降序）
+    const minSx = Math.min(...drops.map((d) => d.sx));
+    const maxSx = Math.max(...drops.map((d) => d.sx));
+    segments.push({
+      x1: minSx,
+      y1: jogY,
+      x2: maxSx,
+      y2: jogY,
+      arrow: false,
+      edgeId: primary.id,
+      toId: to.id,
+      kind: 'bus',
+      control: to.control ?? false,
+    });
+    segments.push({
+      x1: cx,
+      y1: jogY,
+      x2: cx,
+      y2: cy,
+      arrow: true,
+      edgeId: primary.id,
+      toId: to.id,
+      kind: 'entry',
+      control: to.control ?? false,
     });
   }
 

@@ -235,11 +235,16 @@ describe('布局引擎', () => {
     expect(Math.abs(holding.x + holding.w / 2 - (b.x + b.w / 2))).toBeLessThan(1);
     expect(person.y).toBeLessThan(a.y);
     expect(a.y).toBeLessThan(target.y);
-    // 禁止大范围横向汇流线：不存在 bus 线段，每条关系独立连线且带箭头
-    expect(fit.layout.segments.some((s) => s.kind === 'bus')).toBe(false);
-    for (const e of fit.layout.edges) {
-      expect((e.path ?? []).some((s) => s.arrow)).toBe(true);
-    }
+    // 多股东汇聚：只存在一条共享横线 + 单一入口箭头，不再为每个股东各画一条横向折线
+    expect(fit.layout.segments.filter((s) => s.kind === 'bus').length).toBe(1);
+    const targetEdges = fit.layout.edges.filter((e) => e.toId === target.id);
+    const targetArrows = targetEdges.flatMap((e) => e.path ?? []).filter((s) => s.arrow);
+    expect(targetArrows.length).toBe(1);
+    // 单父链保持独立直连箭头
+    const chainEdges = fit.layout.edges.filter((e) => e.toId !== target.id && e.fromId !== target.id);
+    expect(chainEdges.every((e) => (e.path ?? []).some((s) => s.arrow))).toBe(true);
+    // 每条边的 path 非空
+    for (const e of fit.layout.edges) expect((e.path ?? []).length).toBeGreaterThan(0);
     // 比例标签绑定 Edge
     expect(fit.layout.edges.every((e) => e.labelPosition !== undefined)).toBe(true);
     // 页面优先 A4 横向
