@@ -9,6 +9,7 @@ import { fitLayout } from '../src/lib/layout/page';
 import { checkLayout } from '../src/lib/layout/collision';
 import { generatePptx } from '../src/lib/ppt/generatePptx';
 import { renderChartSvg } from '../src/lib/preview/svg';
+import { EDGE_CROSS_COLORS } from '../src/lib/theme';
 
 const ROOT = process.cwd();
 
@@ -128,5 +129,87 @@ describe.skipIf(!findSample())('真实工商 Excel 全流程验收', () => {
     expect(roundRects.every((sp) => sp.includes('<p:txBody>'))).toBe(true);
     const relsXml = await zip.file('ppt/slides/_rels/slide1.xml.rels')!.async('text');
     expect(relsXml).not.toContain('image'); // 禁止图片插入
+  }, 180000);
+});
+
+const BEILAI = 'D:/uu/GameViewer/Download/深圳贝特莱电子科技股份有限公司_W6ff38750f30c84fbe4a9a2c7.xlsx';
+describe.skipIf(!existsSync(BEILAI))('复杂股权图（贝特莱）验收', () => {
+  it('每个层级标注比例、标签不遮线、交叉线自动着色、无负数尺寸', async () => {
+    const wb = XLSX.readFile(BEILAI);
+    const parsed = parseWorkbook(wb);
+    const tree = buildEquityTree(
+      parsed.targetName!,
+      parsed.relations,
+      parsed.entityTypes ?? {},
+      { threshold: 25, stopAtNaturalPerson: true, stopAtOverseas: true, showBelowThreshold: true, maxLevel: 20, ratioPrecision: 2 },
+    );
+    const fit = fitLayout(tree, {
+      pageMode: 'auto',
+      mergeRatio: 25,
+      autoMerge: true,
+      showRegPlace: true,
+      mergeBelow: false,
+      ratioPrecision: 2,
+      textLayout: 'horizontal',
+    });
+    const report = checkLayout(fit.layout);
+    expect(report.nodeOverlaps).toBe(0);
+    expect(report.segmentNodeHits).toBe(0);
+    expect(report.labelNodeHits).toBe(0);
+    expect(report.labelOverlaps).toBe(0);
+    expect(report.labelSegmentHits).toBe(0);
+    // 每个有比例的持股关系都必须标注
+    const edgeTexts = fit.layout.edges.filter((e) => e.label && e.label !== '—' && e.label !== '不详');
+    const labelIds = new Set(fit.layout.labels.map((l) => l.edgeId));
+    for (const e of edgeTexts) expect(labelIds.has(e.fromId)).toBe(true);
+    // 标签在线两侧分布
+    expect(fit.layout.labels.some((l) => l.side === 'left')).toBe(true);
+    expect(fit.layout.labels.some((l) => l.side === 'right')).toBe(true);
+    // 交叉/重叠线段使用调色板颜色（区分色），且同一路径同色
+    for (const s of fit.layout.segments) {
+      if (s.color) expect(EDGE_CROSS_COLORS).toContain(s.color);
+    }
+    const coloredByEdge = new Map<string, Set<string>>();
+    for (const s of fit.layout.segments) {
+      if (!s.color) continue;
+      const set = coloredByEdge.get(s.edgeId) ?? new Set<string>();
+      set.add(s.color);
+      coloredByEdge.set(s.edgeId, set);
+    }
+    for (const set of coloredByEdge.values()) expect(set.size).toBe(1);
+
+    const buf = (await generatePptx(
+      {
+        tree: fit.tree,
+        layout: fit.layout,
+        page: fit.page,
+        pxToIn: fit.pxToIn,
+        title: `${tree.targetName} 股权穿透结构图`,
+        subtitle: `数据来源：工商股权结构报告 · 穿透阈值 25%`,
+        threshold: 25,
+        mergeRatio: 25,
+        mergedGroups: 0,
+      },
+      'nodebuffer',
+    )) as Buffer;
+    const zip = await JSZip.loadAsync(buf);
+    const slideXml = await zip.file('ppt/slides/slide1.xml')!.async('text');
+    expect(slideXml.match(/<a:ext cx="-\d+|cy="-\d+/)).toBeNull();
+    const txBoxCount = (slideXml.match(/txBox="1"/g) || []).length;
+    const txBodyCount = (slideXml.match(/<p:txBody>/g) || []).length;
+    expect(txBoxCount).toBe(txBodyCount);
+    // 区分色确实写入 PPT
+    for (const c of [...coloredByEdge.values()].map((s) => [...s][0])) {
+      expect(slideXml).toContain(`val="${c}"`);
+    }
+    const outDir = join(ROOT, 'out');
+    writeFileSync(join(outDir, '深圳贝特莱电子科技股份有限公司-股权穿透结构图-规范版.pptx'), buf);
+    writeFileSync(
+      join(outDir, 'preview-beilai.html'),
+      `<!doctype html><html><head><meta charset="utf-8"></head><body style="margin:0;background:#fff">${renderChartSvg(
+        fit.layout,
+        25,
+      )}</body></html>`,
+    );
   }, 180000);
 });

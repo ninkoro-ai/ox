@@ -10,7 +10,13 @@ import type {
   TreeNode,
 } from '../types';
 import { nodeSize, nodeSizeForWidth, ratioLabelSize } from './measure';
-import { checkLayout, segIntersectsRectStrict } from './collision';
+import {
+  checkLayout,
+  findSegmentCollinearOverlaps,
+  findSegmentCrossings,
+  segIntersectsRectStrict,
+} from './collision';
+import { EDGE_CROSS_COLORS } from '../theme';
 
 export interface LayoutConfig {
   hGap: number; // 兄弟子树水平间距
@@ -203,6 +209,24 @@ export function layoutTree(
     if (list) list.push({ fromId: e.fromId, ratio: e.ratio });
     else byTo.set(e.toId, [{ fromId: e.fromId, ratio: e.ratio }]);
   }
+  // 同一股东有多条出资线时，各条线从文本框底部略微错开，避免竖直段重叠
+  const outCount = new Map<string, number>();
+  for (const list of byTo.values()) {
+    const seen = new Set<string>();
+    for (const e of list) {
+      if (seen.has(e.fromId)) continue;
+      seen.add(e.fromId);
+      outCount.set(e.fromId, (outCount.get(e.fromId) ?? 0) + 1);
+    }
+  }
+  const outUsed = new Map<string, number>();
+  const dropX = (f: LayoutNode): number => {
+    const total = outCount.get(f.id) ?? 1;
+    const used = outUsed.get(f.id) ?? 0;
+    outUsed.set(f.id, used + 1);
+    if (total <= 1) return f.x + f.w / 2;
+    return f.x + f.w / 2 + (used - (total - 1) / 2) * 7;
+  };
 
   for (const [toId, incoming] of byTo) {
     const to = nodeById.get(toId)!;
@@ -214,7 +238,7 @@ export function layoutTree(
 
     if (froms.length === 1) {
       const f = froms[0];
-      const sx = f.x + f.w / 2;
+      const sx = dropX(f);
       const sy = f.y + f.h;
       if (
         crossesAny(sx, sy, sx, to.y, nodeRects)
@@ -255,7 +279,7 @@ export function layoutTree(
     let minX = Infinity;
     let maxX = -Infinity;
     froms.forEach((f) => {
-      const sx = f.x + f.w / 2;
+      const sx = dropX(f);
       const sy = f.y + f.h;
       if (crossesAny(sx, sy, sx, busY, nodeRects)) {
         // 向下会穿过其他文本框时（共享主体长距离边、境外股东等），从页面左侧绕行接入总线
@@ -405,12 +429,41 @@ function applyZoneSplit(nodes: LayoutNode[], cfg: LayoutConfig): boolean {
 export type RatioLabelSideMode = 'both' | 'right';
 
 const LABEL_GAP = 6; // 比例标签与连接线的水平间距
+const COMPACT_LABEL_FONT = 8; // 页面紧凑时比例标签缩小后的字号
 const VERTICAL_NAME_W = 34; // 纵向排版时文本框宽度（约一个字宽）
 const MANY_SHAREHOLDERS = 7; // 同层股东数量达到该值视为“较多”，触发混合排版
 const SMALL_RATIO = 5; // 混合排版中持股低于该百分比（%）的股东使用纵向文本框
 const BOUNDARY_PAD = 26; // 分隔线与境外节点底部的间距（含“境外”标签）
 const BOUNDARY_MIN_PAD = 16; // 境外节点底部到虚线的最小间距
 const BOUNDARY_LABEL_H = 14; // “境外/境内”标签高度
+
+/**
+ * 连线冲突着色：存在交叉或共线重叠的连线改为调色板颜色（默认黑色之外），
+ * 同一持股路径的所有线段使用同一颜色，避免视觉混淆且保持可打印。
+ */
+export function applySegmentColors(segments: LayoutSegment[]): void {
+  const crossing = findSegmentCrossings(segments);
+  const overlap = findSegmentCollinearOverlaps(segments);
+  const involved = new Set<number>();
+  for (const p of [...crossing, ...overlap]) {
+    involved.add(p.i);
+    involved.add(p.j);
+  }
+  if (involved.size === 0) return;
+  const edgeColors = new Map<string, string>();
+  let colorIdx = 0;
+  for (const idx of [...involved].sort((a, b) => a - b)) {
+    const seg = segments[idx];
+    const key = seg.edgeId;
+    let color = edgeColors.get(key);
+    if (!color) {
+      color = EDGE_CROSS_COLORS[colorIdx % EDGE_CROSS_COLORS.length];
+      colorIdx++;
+      edgeColors.set(key, color);
+    }
+    seg.color = color;
+  }
+}
 
 /**
  * 在连线旁附加持股比例标签，并计算境内/境外分隔虚线。
@@ -487,41 +540,45 @@ export function attachRatioLabels(
       if (boundary && seg.y1 < boundary.y && seg.y2 > boundary.y) {
         anchorY = Math.min(boundary.y + 12, seg.y2 - 10);
       }
-      const size = ratioLabelSize(text);
       // 朝向被投资企业一侧：股东在被投资企业左侧则标在右下，右侧则标在左下
       const preferred: RatioLabelSide = sideMode === 'right' ? 'right' : e.from.x <= to.x ? 'right' : 'left';
-      // 候选位置：优先同侧，必要时加大间距/上下偏移/换到另一侧，避免与连线或文本框重合
-      const placements: Array<{ side: RatioLabelSide; dy: number; gap: number }> =
-        sideMode === 'right'
-          ? [
-              { side: 'right', dy: 0, gap: LABEL_GAP },
-              { side: 'right', dy: 0, gap: LABEL_GAP + 10 },
-              { side: 'right', dy: -10, gap: LABEL_GAP },
-              { side: 'right', dy: 10, gap: LABEL_GAP },
-              { side: 'right', dy: -20, gap: LABEL_GAP },
-              { side: 'right', dy: 20, gap: LABEL_GAP },
-            ]
-          : [
-              { side: preferred, dy: 0, gap: LABEL_GAP },
-              { side: preferred, dy: 0, gap: LABEL_GAP + 10 },
-              { side: preferred, dy: -10, gap: LABEL_GAP },
-              { side: preferred, dy: 10, gap: LABEL_GAP },
-              { side: preferred === 'left' ? 'right' : 'left', dy: 0, gap: LABEL_GAP },
-              { side: preferred === 'left' ? 'right' : 'left', dy: 0, gap: LABEL_GAP + 10 },
-              { side: preferred, dy: -20, gap: LABEL_GAP },
-              { side: preferred, dy: 20, gap: LABEL_GAP },
-            ];
-      let chosen: { x: number; y: number; side: RatioLabelSide } | null = null;
-      for (const c of placements) {
-        const cx = c.side === 'left' ? seg.x1 - c.gap - size.w : seg.x1 + c.gap;
-        const cy = anchorY + c.dy - size.h / 2;
-        const rect = { x: cx, y: cy, w: size.w, h: size.h };
-        const hitNode = layout.nodes.some((n) => rectsOverlap(rect, { x: n.x, y: n.y, w: n.w, h: n.h }));
-        const hitSeg = layout.segments.some((s) => segIntersectsRectStrict(s.x1, s.y1, s.x2, s.y2, rect));
-        const hitLabel = labels.some((l) => rectsOverlap(rect, { x: l.x, y: l.y, w: l.w, h: l.h }));
-        if (!hitNode && !hitSeg && !hitLabel) {
-          chosen = { x: cx, y: cy, side: c.side };
-          break;
+      // 候选位置：优先同侧，必要时加大间距/上下偏移/换到另一侧，避免与连线或文本框重合；
+      // 页面紧凑时先缩小标签字号再放宽间距，保证每个层级都明确标注且不遮挡股权线
+      const placements: Array<{ side: RatioLabelSide; dy: number; gap: number }> = [];
+      const sides: RatioLabelSide[] =
+        sideMode === 'right' ? ['right'] : [preferred, preferred === 'left' ? 'right' : 'left'];
+      for (const side of sides) {
+        for (const dy of [0, -10, 10, -20, 20, -30, 30]) {
+          for (const gap of [LABEL_GAP, LABEL_GAP + 8, LABEL_GAP + 16, LABEL_GAP + 26]) {
+            placements.push({ side, dy, gap });
+          }
+        }
+      }
+      const tryPlace = (size: { w: number; h: number }): { x: number; y: number; side: RatioLabelSide; score: number } | null => {
+        let best: { x: number; y: number; side: RatioLabelSide; score: number } | null = null;
+        for (const c of placements) {
+          const cx = c.side === 'left' ? seg.x1 - c.gap - size.w : seg.x1 + c.gap;
+          const cy = anchorY + c.dy - size.h / 2;
+          const rect = { x: cx, y: cy, w: size.w, h: size.h };
+          const hitNode = layout.nodes.some((n) => rectsOverlap(rect, { x: n.x, y: n.y, w: n.w, h: n.h }));
+          const hitSeg = layout.segments.some((s) => segIntersectsRectStrict(s.x1, s.y1, s.x2, s.y2, rect));
+          const hitLabel = labels.some((l) => rectsOverlap(rect, { x: l.x, y: l.y, w: l.w, h: l.h }));
+          const score = (hitNode ? 1 : 0) + (hitSeg ? 1 : 0) + (hitLabel ? 1 : 0);
+          if (score === 0) return { x: cx, y: cy, side: c.side, score };
+          if (best === null || score < best.score) best = { x: cx, y: cy, side: c.side, score };
+        }
+        return best;
+      };
+      const normalSize = ratioLabelSize(text);
+      let size = normalSize;
+      let chosen = tryPlace(normalSize);
+      if (chosen && chosen.score > 0) {
+        // 紧凑回退：缩小标签字号后重试，仍无法完全避让时选重叠最少的候选
+        const compactSize = ratioLabelSize(text, COMPACT_LABEL_FONT);
+        const compact = tryPlace(compactSize);
+        if (compact && compact.score < chosen.score) {
+          chosen = compact;
+          size = compactSize;
         }
       }
       if (!chosen) {
@@ -529,6 +586,7 @@ export function attachRatioLabels(
           x: preferred === 'left' ? seg.x1 - LABEL_GAP - size.w : seg.x1 + LABEL_GAP,
           y: anchorY - size.h / 2,
           side: preferred,
+          score: 1,
         };
       }
       labels.push({
@@ -594,5 +652,7 @@ export function attachRatioLabels(
   layout.height = Math.max(maxY + dy + margin.bottom, layout.height);
   layout.labels = labels;
   layout.boundary = boundary;
+  // 连线交叉/重叠着色（放最后，避免影响标签避让计算）
+  applySegmentColors(layout.segments);
   return layout;
 }

@@ -11,7 +11,7 @@ export const REG_PREFIX = '注册地：';
 export const RATIO_FONT_SIZE = 10;
 export const RATIO_LABEL_H = 16;
 export const RATIO_LABEL_PAD = 6;
-export const MAX_NODE_W = 280; // 公司文本框宽度上限，尽量让名称显示在一行
+export const MAX_NODE_W = 200; // 公司文本框宽度上限：A4 上保证可读字号，超长名称自动换行
 
 export function textWidth(text: string, fontSize: number = FONT_SIZE): number {
   let w = 0;
@@ -90,9 +90,9 @@ export function nodeSizeForWidth(
 }
 
 /** 持股比例标签的尺寸（独立文本框，置于连接线两侧） */
-export function ratioLabelSize(text: string): { w: number; h: number } {
+export function ratioLabelSize(text: string, fontSize: number = RATIO_FONT_SIZE): { w: number; h: number } {
   return {
-    w: textWidth(text, RATIO_FONT_SIZE) + RATIO_LABEL_PAD * 2,
-    h: RATIO_LABEL_H,
+    w: textWidth(text, fontSize) + Math.max(4, fontSize * 0.6),
+    h: Math.max(RATIO_LABEL_H - 2, fontSize * 1.5),
   };
 }

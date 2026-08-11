@@ -75,18 +75,18 @@ export async function generatePptx(
   }
 
   const toIn = (v: number) => v * opts.pxToIn;
-  const toPt = (px: number) => Math.max(7, Math.min(40, px * opts.pxToIn * 72));
+  const toPt = (px: number) => Math.max(8, Math.min(40, px * opts.pxToIn * 72));
   // 比例标签单行显示：盒子窄时缩小字号而不是折行
   const fitRatioPt = (text: string, wIn: number): number => {
     const baseW = textWidth(text, 10);
-    if (baseW <= 0) return toPt(10);
+    if (baseW <= 0) return toPt(11);
     const maxPt = wIn * 72;
-    const f = Math.min(toPt(10), maxPt / (baseW * 0.075));
-    return Math.max(6, f);
+    const f = Math.min(toPt(11), maxPt / (baseW * 0.075));
+    return Math.max(6.5, f);
   };
   // 公司名称/注册地自适应字号：按文本框实际宽高动态缩放，保证文字不超出文本框
   const fitFont = (lines: string[], wIn: number, hIn: number, desiredPt: number, basePx: number): number => {
-    if (lines.length === 0 || wIn <= 0 || hIn <= 0) return Math.max(desiredPt, 4);
+    if (lines.length === 0 || wIn <= 0 || hIn <= 0) return Math.max(desiredPt, 6.5);
     const wLimit = Math.min(
       ...lines.map((l) => {
         const bw = textWidth(l, basePx);
@@ -94,7 +94,7 @@ export async function generatePptx(
       }),
     );
     const hLimit = (hIn * 72) / (lines.length * 1.35);
-    return Math.max(4, Math.min(desiredPt, wLimit, hLimit));
+    return Math.max(6.5, Math.min(desiredPt, wLimit, hLimit));
   };
 
   // 水平居中（保留顶部起始位置，简单图表约占半张 A4 版面）
@@ -119,7 +119,7 @@ export async function generatePptx(
       w: toIn(Math.abs(s.x2 - s.x1)),
       h: toIn(Math.abs(s.y2 - s.y1)),
       line: {
-        color: EDGE_COLOR,
+        color: s.color ?? EDGE_COLOR,
         width: 1.3,
         endArrowType: s.arrow ? 'triangle' : 'none',
       },

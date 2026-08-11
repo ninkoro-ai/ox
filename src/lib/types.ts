@@ -116,6 +116,8 @@ export interface LayoutSegment {
   arrow: boolean;
   edgeId: string;
   kind: 'drop' | 'bus' | 'entry';
+  /** 连线颜色（RRGGBB，不含 #）。默认黑色；与其他连线交叉/重叠时为防混淆改用调色板颜色 */
+  color?: string;
 }
 
 export type RatioLabelSide = 'left' | 'right';

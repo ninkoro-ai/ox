@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import type { EquityRelation } from '../src/lib/types';
+import type { EquityRelation, LayoutSegment } from '../src/lib/types';
 import { buildEquityTree } from '../src/lib/graph/penetrate';
 import { checkLayout } from '../src/lib/layout/collision';
 import { fitLayout, PAGES } from '../src/lib/layout/page';
+import { applySegmentColors } from '../src/lib/layout/layout';
 
 const OPTS = {
   threshold: 25,
@@ -41,9 +42,18 @@ describe('布局引擎', () => {
     expect(report.labelNodeHits).toBe(0);
     expect(report.labelOverlaps).toBe(0);
     expect(report.labelSegmentHits).toBe(0);
-    // A4 紧凑版面：比例统一在连接线右侧（线中间位置）
+    // 比例标签在线两侧（朝向被投资企业一侧），页面紧凑时自动缩字号避让
     expect(fit.layout.labels.length).toBeGreaterThan(0);
-    expect(fit.layout.labels.every((l) => l.side === 'right')).toBe(true);
+    expect(fit.layout.labels.some((l) => l.side === 'left')).toBe(true);
+    expect(fit.layout.labels.some((l) => l.side === 'right')).toBe(true);
+    // 每个有比例的持股关系都必须标注
+    const edgeTexts = fit.layout.edges.filter((e) => e.label && e.label !== '—' && e.label !== '不详');
+    const labelTexts = new Set(fit.layout.labels.map((l) => l.edgeId));
+    for (const e of edgeTexts) expect(labelTexts.has(e.fromId)).toBe(true);
+    // 标签不与股权线相交
+    expect(report.labelSegmentHits).toBe(0);
+    // 无交叉时连线保持黑色
+    expect(fit.layout.segments.every((s) => s.color === undefined)).toBe(true);
     // 有境外股东时绘制境内外分隔虚线
     expect(fit.layout.boundary).not.toBeNull();
     // 同一层股东文本框等宽；除超长名称外尽量单行
@@ -167,6 +177,25 @@ describe('布局引擎', () => {
     expect(report.segmentCrossings).toBe(0);
     expect(report.labelNodeHits).toBe(0);
     expect(report.labelSegmentHits).toBe(0);
+  });
+
+  it('连线交叉/重叠时自动使用不同颜色防止混淆', () => {
+    const segments: LayoutSegment[] = [
+      { x1: 0, y1: 10, x2: 100, y2: 10, arrow: false, edgeId: 'a', kind: 'drop' as const },
+      { x1: 50, y1: 0, x2: 50, y2: 80, arrow: false, edgeId: 'b', kind: 'drop' as const },
+      { x1: 0, y1: 40, x2: 120, y2: 40, arrow: false, edgeId: 'c', kind: 'bus' as const },
+      { x1: 90, y1: 40, x2: 90, y2: 120, arrow: false, edgeId: 'd', kind: 'entry' as const },
+      { x1: 0, y1: 60, x2: 100, y2: 60, arrow: false, edgeId: 'e', kind: 'bus' as const },
+    ];
+    applySegmentColors(segments);
+    const colored = segments.filter((s) => s.color && s.color !== '000000');
+    expect(colored.length).toBeGreaterThan(0);
+    // 同一持股路径的所有线段同色
+    const colorsOfA = segments.filter((s) => s.edgeId === 'a').map((s) => s.color);
+    expect(new Set(colorsOfA).size).toBeLessThanOrEqual(1);
+    // 参与交叉的路径颜色互不相同
+    const distinct = new Set(segments.map((s) => s.color).filter(Boolean));
+    expect(distinct.size).toBeGreaterThanOrEqual(2);
   });
 
   it('文本框方向由用户选择：横向自动换行不超页，纵向一字一行', () => {

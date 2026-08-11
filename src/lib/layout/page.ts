@@ -11,16 +11,15 @@ export const PAGES: Record<PageKey, { name: string; wIn: number; hIn: number }> 
 const MARGIN_X_IN = 0.55;
 const MARGIN_TOP_IN = 1.15;
 const MARGIN_BOTTOM_IN = 0.4;
-// pxToIn 单位：英寸/像素。名称字号 13px 对应 pt = 13 * pxToIn * 72，
-// 因此 0.0085 ≈ 8pt，是最低可读字号
-const MIN_GOOD_16X9 = 0.0085;
-// 等宽文本框后 A4 版面可容纳约 7.7pt 字号
-const MIN_GOOD_A4 = 0.0082;
-const MIN_GOOD_A3 = 0.0075;
-const MIN_MANUAL = 0.007;
-const MIN_ALLOWED = 0.0045;
-// 简单结构不放大铺满整页：名称 13px 最多约 14pt，图表保持“约半张 A4”的紧凑尺寸
-const MAX_SCALE = 0.015;
+// pxToIn 单位：英寸/像素。名称字号 13px 对应 pt = 13 * pxToIn * 72。
+// 提高下限保证办公电脑/打印清晰可读：约 9pt 起（0.0095），页面放不下时自动升档到 A3
+const MIN_GOOD_16X9 = 0.0098;
+const MIN_GOOD_A4 = 0.0095;
+const MIN_GOOD_A3 = 0.0085;
+const MIN_MANUAL = 0.008;
+const MIN_ALLOWED = 0.0065;
+// 简单结构不放大铺满整页：名称 13px 最多约 15.5pt，图表保持“约半张 A4”的紧凑尺寸
+const MAX_SCALE = 0.0165;
 
 function scaleFor(page: PageKey, layout: LayoutResult): number {
   const p = PAGES[page];
@@ -232,8 +231,9 @@ export function fitLayout(tree: EquityTree, opts: FitOptions): FitResult {
     chosen = { page, layout, scale: scaleFor(page, layout) };
   }
 
-  // 比例标签：A4（紧凑）统一右侧，16:9 / A3 左右交替
-  const layout = attachRatioLabels(chosen.layout, chosen.page === 'a4' ? 'right' : 'both');
+  // 比例标签：所有页面均在线两侧（左右交替/朝向被投资企业一侧），
+  // 页面紧凑时由标签布局自动缩小字号并加大间距，确保不遮挡股权线
+  const layout = attachRatioLabels(chosen.layout, 'both');
   const page = chosen.page;
   // 最终缩放：图表整体面积约占页面 4/5（线性约 89.4%），不铺满整页；
   // 内容过小时仍按可读上限，放不下时绝不超出页面范围
@@ -241,6 +241,8 @@ export function fitLayout(tree: EquityTree, opts: FitOptions): FitResult {
   const s = Math.min(clampScale(fitScale) * 0.894, fitScale);
   if (fitScale < MIN_ALLOWED) {
     warnings.push('内容较多，图表已按最小可读尺寸缩放；建议切换纵向文本框或调低合并阈值/拆分展示');
+  } else if (s < 0.0088) {
+    warnings.push('图表字号偏小，建议选择 A3 横向或开启自动合并以提升可读性');
   }
   return {
     tree: current,
