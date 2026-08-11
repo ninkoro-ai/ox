@@ -9,3 +9,4 @@ vite-dev.*
 .wrangler
 .DS_Store
 *.log
+*.zip
