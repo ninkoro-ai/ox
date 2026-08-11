@@ -120,6 +120,7 @@ export async function generatePptx(
           bold: n.isTarget,
           color: NODE_TEXT,
           fontFace: 'Microsoft YaHei',
+          breakLine: Boolean(n.regPlace),
         },
       },
     ];
@@ -130,7 +131,6 @@ export async function generatePptx(
           fontSize: toPt(10),
           color: NODE_TEXT,
           fontFace: 'Microsoft YaHei',
-          breakLine: true,
         },
       });
     }

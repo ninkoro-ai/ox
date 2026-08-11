@@ -10,6 +10,7 @@ export interface SettingsState {
   showRegPlace: boolean;
   mergeBelow: boolean;
   ratioPrecision: number;
+  verticalText: boolean;
 }
 
 interface Props {
@@ -30,6 +31,7 @@ export const DEFAULT_SETTINGS: SettingsState = {
   showRegPlace: true,
   mergeBelow: false,
   ratioPrecision: 2,
+  verticalText: false,
 };
 
 export default function SettingsPanel({ settings, onChange, disabled }: Props) {
@@ -107,6 +109,19 @@ export default function SettingsPanel({ settings, onChange, disabled }: Props) {
             <option value="a4">A4 横向</option>
             <option value="a3">A3 横向</option>
           </select>
+          <small>切换页面后图表会重新生成</small>
+        </label>
+        <label>
+          文本框文字方向
+          <select
+            value={settings.verticalText ? 'vertical' : 'horizontal'}
+            disabled={disabled}
+            onChange={(e) => set({ verticalText: e.target.value === 'vertical' })}
+          >
+            <option value="horizontal">横向（名称自动换行）</option>
+            <option value="vertical">纵向（名称一字一行）</option>
+          </select>
+          <small>横向放不下时文字自动换行；纵向更省宽度</small>
         </label>
       </div>
       <div className="settings-checks">

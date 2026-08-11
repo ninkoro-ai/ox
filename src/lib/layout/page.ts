@@ -40,6 +40,7 @@ export interface FitOptions {
   showRegPlace: boolean;
   mergeBelow: boolean; // 生成前按用户阈值归并低比例股东
   ratioPrecision: number; // 持股比例小数位
+  verticalText?: boolean; // 文本框文字方向：true=纵向（一字一行），默认横向
 }
 
 export interface FitResult {
@@ -201,7 +202,7 @@ export function fitLayout(tree: EquityTree, opts: FitOptions): FitResult {
 
   let chosen: { page: PageKey; layout: LayoutResult; scale: number } | null = null;
   for (let attempt = 0; attempt < 4; attempt++) {
-    const hit = tryPage(current);
+    const hit = tryPage(current, opts.verticalText ?? false);
     if (hit) {
       chosen = { page: hit.page, layout: hit.layout, scale: hit.scale };
       break;
@@ -213,17 +214,12 @@ export function fitLayout(tree: EquityTree, opts: FitOptions): FitResult {
     mergedGroups += res.groups;
   }
 
-  // 横向排布放不下时，改用纵向文本框（名称一字一行）压缩宽度，尽量保持在页内
-  if (!chosen) {
-    const verticalHit = tryPage(current, true);
-    if (verticalHit) chosen = verticalHit;
-  }
   if (!chosen) {
     const page: PageKey = opts.pageMode === 'auto' ? 'a3' : opts.pageMode;
     const layout = layoutTree(current, {
       ...DEFAULT_LAYOUT_CONFIG,
       showRegPlace: opts.showRegPlace,
-      verticalNames: true,
+      verticalNames: opts.verticalText ?? false,
     });
     chosen = { page, layout, scale: scaleFor(page, layout) };
   }
@@ -235,7 +231,7 @@ export function fitLayout(tree: EquityTree, opts: FitOptions): FitResult {
   const fitScale = scaleFor(page, layout);
   const s = Math.min(clampScale(fitScale), fitScale);
   if (fitScale < MIN_ALLOWED) {
-    warnings.push('内容较多，已采用纵向文本框排布以适配页面；建议调低合并阈值或拆分展示');
+    warnings.push('内容较多，图表已按最小可读尺寸缩放；建议切换纵向文本框或调低合并阈值/拆分展示');
   }
   return {
     tree: current,

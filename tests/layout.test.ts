@@ -169,24 +169,40 @@ describe('布局引擎', () => {
     expect(report.labelSegmentHits).toBe(0);
   });
 
-  it('横向放不下时自动采用纵向文本框排布，且不超出页面范围', () => {
+  it('文本框方向由用户选择：横向自动换行不超页，纵向一字一行', () => {
     const relations: EquityRelation[] = [];
     for (let i = 1; i <= 12; i++) {
       relations.push({ investor: `深圳市某大型股权投资企业（有限合伙）${i}号`, investee: '目标公司', ratio: 5 + i });
     }
     const tree = makeTree(relations);
-    const fit = fitLayout(tree, {
+    const fitH = fitLayout(tree, {
       pageMode: 'auto',
       mergeRatio: 25,
       autoMerge: false,
       showRegPlace: true,
       mergeBelow: false,
       ratioPrecision: 2,
+      verticalText: false,
     });
-    const page = PAGES[fit.page];
-    expect(fit.layout.width * fit.pxToIn).toBeLessThanOrEqual(page.wIn + 0.01);
-    expect(fit.layout.height * fit.pxToIn).toBeLessThanOrEqual(page.hIn + 0.01);
-    const long = fit.layout.nodes.find((n) => n.name.includes('大型股权投资'))!;
-    expect(long.lines.length).toBeGreaterThanOrEqual([...long.name].length - 1);
+    const pageH = PAGES[fitH.page];
+    expect(fitH.layout.width * fitH.pxToIn).toBeLessThanOrEqual(pageH.wIn + 0.01);
+    expect(fitH.layout.height * fitH.pxToIn).toBeLessThanOrEqual(pageH.hIn + 0.01);
+    const longH = fitH.layout.nodes.find((n) => n.name.includes('大型股权投资'))!;
+    expect(longH.lines.length).toBeLessThan([...longH.name].length - 1);
+
+    const fitV = fitLayout(tree, {
+      pageMode: 'auto',
+      mergeRatio: 25,
+      autoMerge: false,
+      showRegPlace: true,
+      mergeBelow: false,
+      ratioPrecision: 2,
+      verticalText: true,
+    });
+    const pageV = PAGES[fitV.page];
+    expect(fitV.layout.width * fitV.pxToIn).toBeLessThanOrEqual(pageV.wIn + 0.01);
+    expect(fitV.layout.height * fitV.pxToIn).toBeLessThanOrEqual(pageV.hIn + 0.01);
+    const longV = fitV.layout.nodes.find((n) => n.name.includes('大型股权投资'))!;
+    expect(longV.lines.length).toBeGreaterThanOrEqual([...longV.name].length - 1);
   });
 });
