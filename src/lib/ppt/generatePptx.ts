@@ -81,6 +81,18 @@ export async function generatePptx(
     const f = Math.min(toPt(10), maxPt / (baseW * 0.075));
     return Math.max(6, f);
   };
+  // 公司名称/注册地自适应字号：按文本框实际宽高动态缩放，保证文字不超出文本框
+  const fitFont = (lines: string[], wIn: number, hIn: number, desiredPt: number, basePx: number): number => {
+    if (lines.length === 0 || wIn <= 0 || hIn <= 0) return Math.max(desiredPt, 4);
+    const wLimit = Math.min(
+      ...lines.map((l) => {
+        const bw = textWidth(l, basePx);
+        return bw > 0 ? (wIn * 72) / (bw * basePx * 0.0075) : desiredPt;
+      }),
+    );
+    const hLimit = (hIn * 72) / (lines.length * 1.35);
+    return Math.max(4, Math.min(desiredPt, wLimit, hLimit));
+  };
 
   // 水平居中（保留顶部起始位置，简单图表约占半张 A4 版面）
   const chartW = toIn(opts.layout.width);
@@ -115,11 +127,16 @@ export async function generatePptx(
     const y = toY(n.y);
     const w = toIn(n.w);
     const h = toIn(n.h);
+    const regPt = n.regPlace
+      ? fitFont([`${REG_PREFIX}${n.regPlace}`], w, h, toPt(10), 10)
+      : 0;
+    const regHIn = n.regPlace ? (regPt * 1.35) / 72 : 0;
+    const namePt = fitFont(n.lines, w, Math.max(h - regHIn, 0.1), toPt(13), 13);
     const runs: PptxGenJS.TextProps[] = [
       {
         text: n.lines.join('\n'),
         options: {
-          fontSize: toPt(13),
+          fontSize: namePt,
           bold: n.isTarget,
           color: NODE_TEXT,
           fontFace: 'Microsoft YaHei',
@@ -131,7 +148,7 @@ export async function generatePptx(
       runs.push({
         text: `${REG_PREFIX}${n.regPlace}`,
         options: {
-          fontSize: toPt(10),
+          fontSize: regPt,
           color: NODE_TEXT,
           fontFace: 'Microsoft YaHei',
         },

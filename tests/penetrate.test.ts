@@ -24,23 +24,22 @@ describe('银行授信股权穿透规则', () => {
     expect(t.nodes.filter((n) => n.level === 1).length).toBe(2);
   });
 
-  it('第二层起按 25% 阈值穿透：A 继续展示，B/C 停止', () => {
+  it('第一层超 25% 的控制链持续穿透，直至境外公司或个人股东', () => {
     const t = tree([
       { investor: '旭阳集团', investee: '目标公司', ratio: 80 },
       { investor: 'A公司', investee: '旭阳集团', ratio: 60 },
       { investor: 'B公司', investee: '旭阳集团', ratio: 20 },
-      { investor: 'C公司', investee: '旭阳集团', ratio: 20 },
-      { investor: '自然人张三', investee: 'A公司', ratio: 100 },
+      { investor: 'C公司', investee: 'B公司', ratio: 100 },
+      { investor: '张三', investee: 'A公司', ratio: 100 },
     ]);
     const a = t.nodes.find((n) => n.name === 'A公司');
     const b = t.nodes.find((n) => n.name === 'B公司');
     expect(a?.stopReason).toBe('expanded');
-    expect(b?.stopReason).toBe('below-threshold');
-    // “未穿透”不再显示为框内标签；注册地为境内主体默认中国
-    expect(b?.tag).toBeUndefined();
-    expect(b?.regPlace).toBe('中国');
-    // B/C 仍作为叶子显示
-    expect(t.nodes.filter((n) => n.level === 2).length).toBe(3);
+    // B 虽仅持 20%，但在超 25% 的控制链上，继续向上穿透至其股东
+    expect(b?.stopReason).toBe('expanded');
+    expect(t.nodes.find((n) => n.name === 'C公司')?.level).toBe(3);
+    // 自然人停止穿透
+    expect(t.nodes.find((n) => n.name === '张三')?.stopReason).toBe('natural-person');
   });
 
   it('文本框内不显示任何停止标签，仅保留主体名称', () => {
@@ -54,15 +53,29 @@ describe('银行授信股权穿透规则', () => {
     }
   });
 
-  it('单一持股等于阈值（25%）时停止穿透，超过才继续', () => {
+  it('第一层等于阈值（25%）不触发控制链；超过阈值才继续穿透', () => {
     const t = tree([
       { investor: 'A公司', investee: '目标公司', ratio: 80 },
-      { investor: 'B公司', investee: 'A公司', ratio: 25 },
+      { investor: 'B公司', investee: '目标公司', ratio: 25 },
       { investor: 'C公司', investee: 'A公司', ratio: 26 },
       { investor: 'D公司', investee: 'C公司', ratio: 100 },
     ]);
     expect(t.nodes.find((n) => n.name === 'B公司')?.stopReason).toBe('below-threshold');
     expect(t.nodes.find((n) => n.name === 'C公司')?.stopReason).toBe('expanded');
+  });
+
+  it('超 25% 控制链向上穿透直至个人股东（贝特莱案例）', () => {
+    const t = tree([
+      { investor: '探路者控股集团股份有限公司', investee: '目标公司', ratio: 51 },
+      { investor: '北京通域高精尖股权投资中心（有限合伙）', investee: '探路者控股集团股份有限公司', ratio: 7.8 },
+      { investor: '张三', investee: '北京通域高精尖股权投资中心（有限合伙）', ratio: 60 },
+      { investor: '李四', investee: '北京通域高精尖股权投资中心（有限合伙）', ratio: 40 },
+    ]);
+    const bj = t.nodes.find((n) => n.name.includes('北京通域'))!;
+    expect(bj.stopReason).toBe('expanded');
+    expect(t.nodes.find((n) => n.name === '张三')?.level).toBe(3);
+    expect(t.nodes.find((n) => n.name === '张三')?.stopReason).toBe('natural-person');
+    expect(t.nodes.find((n) => n.name === '李四')?.level).toBe(3);
   });
 
   it('重复股东只列示一次，并补充完整持股路径', () => {
@@ -92,15 +105,18 @@ describe('银行授信股权穿透规则', () => {
     expect(t.nodes.find((n) => n.name === '低比例股东')?.stopReason).toBe('below-threshold');
   });
 
-  it('showBelowThreshold=false 时不显示未穿透股东', () => {
+  it('第一层股东全部展示，超25%控制链不受 showBelowThreshold 影响', () => {
     const t = tree(
       [
-        { investor: '旭阳集团', investee: '目标公司', ratio: 80 },
-        { investor: 'B公司', investee: '旭阳集团', ratio: 20 },
+        { investor: 'A公司', investee: '目标公司', ratio: 80 },
+        { investor: 'B公司', investee: '目标公司', ratio: 20 },
+        { investor: 'C公司', investee: 'A公司', ratio: 10 },
       ],
       { ...OPTS, showBelowThreshold: false },
     );
-    expect(t.nodes.find((n) => n.name === 'B公司')).toBeUndefined();
+    expect(t.nodes.find((n) => n.name === 'B公司')).toBeDefined(); // 第一层全部展示
+    expect(t.nodes.find((n) => n.name === 'A公司')).toBeDefined();
+    expect(t.nodes.find((n) => n.name === 'C公司')).toBeDefined(); // 控制链内继续穿透
   });
 
   it('自然人停止穿透', () => {

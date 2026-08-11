@@ -467,7 +467,11 @@ export function attachRatioLabels(
       const text = e.text;
       if (!text || text === '—' || text === '不详') return;
       const candidates = layout.segments.filter(
-        (s) => (s.kind === 'drop' || s.kind === 'entry') && s.edgeId === e.fromId,
+        // 只取从该股东文本框底部引出的线段（区分“股东→被投资企业”与“其自身被上层持股”）
+        (s) =>
+          (s.kind === 'drop' || s.kind === 'entry') &&
+          s.edgeId === e.fromId &&
+          Math.abs(s.y1 - (e.from.y + e.from.h)) <= 4,
       );
       if (candidates.length === 0) return;
       const seg = candidates.reduce((best, s) =>
@@ -477,12 +481,15 @@ export function attachRatioLabels(
           : best,
       );
 
-      let anchorY = (seg.y1 + seg.y2) / 2; // 线中间位置
+      // 位于股东文本框下方、偏向被投资企业一侧（左下/右下方位），靠近框底更易对应投资关系
+      const dropLen = Math.abs(seg.y2 - seg.y1);
+      let anchorY = seg.y1 + Math.min(dropLen * 0.3, 12);
       if (boundary && seg.y1 < boundary.y && seg.y2 > boundary.y) {
         anchorY = Math.min(boundary.y + 12, seg.y2 - 10);
       }
       const size = ratioLabelSize(text);
-      const preferred: RatioLabelSide = sideMode === 'right' ? 'right' : i % 2 === 0 ? 'left' : 'right';
+      // 朝向被投资企业一侧：股东在被投资企业左侧则标在右下，右侧则标在左下
+      const preferred: RatioLabelSide = sideMode === 'right' ? 'right' : e.from.x <= to.x ? 'right' : 'left';
       // 候选位置：优先同侧，必要时加大间距/上下偏移/换到另一侧，避免与连线或文本框重合
       const placements: Array<{ side: RatioLabelSide; dy: number; gap: number }> =
         sideMode === 'right'

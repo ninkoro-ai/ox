@@ -59,8 +59,8 @@ export function buildEquityTree(
   nodeOf.set(rootId, root);
   nodeByName.set(targetName, rootId);
 
-  const queue: Array<{ id: string; name: string; ancestors: Set<string> }> = [
-    { id: rootId, name: targetName, ancestors: new Set([targetName]) },
+  const queue: Array<{ id: string; name: string; ancestors: Set<string>; deep: boolean }> = [
+    { id: rootId, name: targetName, ancestors: new Set([targetName]), deep: false },
   ];
 
   let skippedByCycle = 0;
@@ -85,9 +85,10 @@ export function buildEquityTree(
 
       const ratio = rel.ratio;
       // 穿透规则：任一层的单一持股超过阈值（默认 25%）就继续向上穿透，
-      // 直至单一持股不超过阈值为止（等于阈值视为“不超过”，停止穿透）
+      // 超过 25% 的第一层直接股东形成的控制链，将一直向上穿透至境外公司或个人股东
       const below = ratio === null ? true : ratio <= opts.threshold;
-      const display = curNode.isTarget ? true : !below || opts.showBelowThreshold;
+      const deep = curNode.isTarget ? !below : cur.deep || !below;
+      const display = curNode.isTarget ? true : deep ? true : !below || opts.showBelowThreshold;
       if (!display) continue;
 
       const isPerson = opts.stopAtNaturalPerson && isLikelyNaturalPerson(investor, entityTypes[investor]);
@@ -97,7 +98,7 @@ export function buildEquityTree(
       if (isPerson) reason = 'natural-person';
       else if (isOverseas) reason = 'overseas';
       else if (ratio === null) reason = 'unknown-ratio';
-      else if (below) reason = 'below-threshold';
+      else if (!deep && below) reason = 'below-threshold';
       else reason = 'expanded';
 
       const hasShareholders = (incoming.get(investor) ?? []).some(
@@ -117,7 +118,7 @@ export function buildEquityTree(
         // 若该主体在新路径上应继续穿透而此前未展开，则补充展开
         if (ex.stopReason !== 'expanded' && reason === 'expanded' && ex.level < opts.maxLevel) {
           ex.stopReason = 'expanded';
-          queue.push({ id: existingId, name: investor, ancestors: new Set([...cur.ancestors, investor]) });
+          queue.push({ id: existingId, name: investor, ancestors: new Set([...cur.ancestors, investor]), deep });
         }
         if (ratio === null) unknownCount++;
         continue;
@@ -148,7 +149,7 @@ export function buildEquityTree(
 
       if (ratio === null) unknownCount++;
       if (reason === 'expanded') {
-        queue.push({ id: childId, name: investor, ancestors: new Set([...cur.ancestors, investor]) });
+        queue.push({ id: childId, name: investor, ancestors: new Set([...cur.ancestors, investor]), deep });
       }
     }
   }
