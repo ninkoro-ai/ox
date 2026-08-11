@@ -197,6 +197,7 @@ export function fitLayout(tree: EquityTree, opts: FitOptions): FitResult {
       ...DEFAULT_LAYOUT_CONFIG,
       showRegPlace: opts.showRegPlace,
       textLayout,
+      layoutMode: opts.layoutMode,
     });
     if (opts.pageMode === 'auto') {
       // 根据节点数量自动选择：A4 放得下且可读（≥9pt）用 A4，否则升 A3；A3 仍不足则触发自动合并
@@ -230,6 +231,7 @@ export function fitLayout(tree: EquityTree, opts: FitOptions): FitResult {
       ...DEFAULT_LAYOUT_CONFIG,
       showRegPlace: opts.showRegPlace,
       textLayout: opts.textLayout ?? 'horizontal',
+      layoutMode: opts.layoutMode,
     });
     chosen = { page, layout, scale: scaleFor(page, layout) };
   }

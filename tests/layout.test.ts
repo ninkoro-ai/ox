@@ -185,6 +185,76 @@ describe('布局引擎', () => {
     expect(primaryEdge.path?.some((s) => s.kind === 'entry' && s.arrow)).toBe(true);
   });
 
+  it('银行授信版式：目标底部中央、控股链纵向、同层降序大股东居中、独立连线无总线', () => {
+    const tree = makeTree([
+      { investor: 'A控股有限公司', investee: '目标公司', ratio: 40 },
+      { investor: 'B投资有限公司', investee: '目标公司', ratio: 30 },
+      { investor: 'C实业有限公司', investee: '目标公司', ratio: 20 },
+      { investor: 'D商贸有限公司', investee: '目标公司', ratio: 10 },
+      { investor: '自然人甲', investee: 'A控股有限公司', ratio: 100 },
+      { investor: '控股乙有限公司', investee: 'B投资有限公司', ratio: 100 },
+    ]);
+    const fit = fitLayout(tree, {
+      pageMode: 'auto',
+      mergeRatio: 5,
+      mergeStartLevel: 2,
+      autoMerge: false,
+      showRegPlace: false,
+      mergeBelow: false,
+      ratioPrecision: 2,
+      layoutMode: 'bank-ownership',
+    });
+    const report = checkLayout(fit.layout);
+    expect(report.nodeOverlaps).toBe(0);
+    expect(report.segmentNodeHits).toBe(0);
+    expect(report.labelSegmentHits).toBe(0);
+
+    const target = fit.layout.nodes.find((n) => n.isTarget)!;
+    // 目标公司固定在最底部
+    expect(target.y).toBe(Math.max(...fit.layout.nodes.map((n) => n.y)));
+    // 第一层股东在目标上方水平展开
+    const level1 = fit.layout.nodes.filter((n) => n.level === 1).sort((a, b) => a.x - b.x);
+    expect(level1.length).toBe(4);
+    expect(level1.every((n) => n.y < target.y)).toBe(true);
+    // 同层按持股比例降序：最大股东（A 40%）最靠近目标中心
+    const targetCx = target.x + target.w / 2;
+    const byRatio = ['A控股有限公司', 'B投资有限公司', 'C实业有限公司', 'D商贸有限公司'];
+    const dist = (id: string) => {
+      const n = fit.layout.nodes.find((x) => x.name === id)!;
+      return Math.abs(n.x + n.w / 2 - targetCx);
+    };
+    for (let i = 0; i < byRatio.length - 1; i++) {
+      expect(dist(byRatio[i])).toBeLessThanOrEqual(dist(byRatio[i + 1]) + 1);
+    }
+    // 控股链保持纵向：自然人甲 与 A控股 同列，控股乙 与 B投资 同列
+    const a = fit.layout.nodes.find((n) => n.name === 'A控股有限公司')!;
+    const person = fit.layout.nodes.find((n) => n.name === '自然人甲')!;
+    const b = fit.layout.nodes.find((n) => n.name === 'B投资有限公司')!;
+    const holding = fit.layout.nodes.find((n) => n.name === '控股乙有限公司')!;
+    expect(Math.abs(person.x + person.w / 2 - (a.x + a.w / 2))).toBeLessThan(1);
+    expect(Math.abs(holding.x + holding.w / 2 - (b.x + b.w / 2))).toBeLessThan(1);
+    expect(person.y).toBeLessThan(a.y);
+    expect(a.y).toBeLessThan(target.y);
+    // 禁止大范围横向汇流线：不存在 bus 线段，每条关系独立连线且带箭头
+    expect(fit.layout.segments.some((s) => s.kind === 'bus')).toBe(false);
+    for (const e of fit.layout.edges) {
+      expect((e.path ?? []).some((s) => s.arrow)).toBe(true);
+    }
+    // 比例标签绑定 Edge
+    expect(fit.layout.edges.every((e) => e.labelPosition !== undefined)).toBe(true);
+    // 页面优先 A4 横向
+    expect(fit.page).toBe('a4');
+    // Edge.path 完整覆盖所有线段
+    const covered = new Set(fit.layout.segments);
+    for (const e of fit.layout.edges) {
+      for (const s of e.path ?? []) {
+        expect(covered.has(s)).toBe(true);
+        covered.delete(s);
+      }
+    }
+    expect(covered.size).toBe(0);
+  });
+
   it('股东过多时自动合并并适配 A3', () => {
     const relations: EquityRelation[] = [];
     for (let i = 1; i <= 60; i++) {

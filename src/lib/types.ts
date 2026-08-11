@@ -229,7 +229,7 @@ export type PageKey = 'a4' | 'a3';
 export type PageMode = 'auto' | PageKey;
 
 /** 布局模式 */
-export type LayoutMode = 'bank-standard' | 'minor-shareholders';
+export type LayoutMode = 'bank-standard' | 'minor-shareholders' | 'bank-ownership';
 
 /**
  * 统一生成配置：贯穿解析、穿透、布局与 PPT 生成全流程

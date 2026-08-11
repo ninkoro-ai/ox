@@ -12,7 +12,7 @@ export interface SettingsState {
   mergeBelow: boolean;
   ratioPrecision: number;
   textLayout: 'horizontal' | 'vertical' | 'combo';
-  layoutMode: 'bank-standard' | 'minor-shareholders';
+  layoutMode: 'bank-standard' | 'minor-shareholders' | 'bank-ownership';
 }
 
 interface Props {
@@ -150,6 +150,7 @@ export default function SettingsPanel({ settings, onChange, disabled }: Props) {
           >
             <option value="bank-standard">银行标准（突出控制链）</option>
             <option value="minor-shareholders">低比例股东合并显示</option>
+            <option value="bank-ownership">银行授信版式（纵向树、独立连线）</option>
           </select>
           <small>银行标准加粗控制链；合并模式自动归并低于合并阈值的股东</small>
         </label>
