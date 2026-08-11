@@ -114,6 +114,13 @@ describe.skipIf(!findSample())('真实工商 Excel 全流程验收', () => {
     expect(slideXml).toContain('注册地：香港');
     expect(slideXml).toContain('注册地：中国');
     expect(slideXml).not.toContain('未穿透');
+    // OOXML 规范要求 a:ext 的 cx/cy >= 0；负数尺寸会让 PowerPoint 弹修复提示
+    expect(slideXml.match(/<a:ext cx="-\d+|cy="-\d+/)).toBeNull();
+    // 所有文本对象都应为标准文本框（txBox="1"），保证可整体拖动二次编辑
+    const txBoxCount = (slideXml.match(/txBox="1"/g) || []).length;
+    const txBodyCount = (slideXml.match(/<p:txBody>/g) || []).length;
+    expect(txBoxCount).toBe(txBodyCount);
+    expect(txBoxCount).toBeGreaterThan(0);
     // 公司节点为单个带边框文本框：所有圆角矩形均内嵌文字，无独立空形状
     const sps = slideXml.split('<p:sp>').slice(1);
     const roundRects = sps.filter((sp) => sp.includes('prstGeom prst="roundRect"'));

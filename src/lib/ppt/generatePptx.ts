@@ -47,6 +47,7 @@ export async function generatePptx(
     color: '1F3864',
     align: 'center',
     fontFace: 'Microsoft YaHei',
+    isTextBox: true,
   });
   slide.addText(opts.subtitle, {
     x: 0.4,
@@ -57,6 +58,7 @@ export async function generatePptx(
     color: '595959',
     align: 'center',
     fontFace: 'Microsoft YaHei',
+    isTextBox: true,
   });
   if (opts.mergedGroups > 0) {
     slide.addText(`已合并 ${opts.mergedGroups} 组持股比例低于 ${opts.mergeRatio}% 的股东，详见明细数据`, {
@@ -68,6 +70,7 @@ export async function generatePptx(
       color: 'BF8F00',
       align: 'center',
       fontFace: 'Microsoft YaHei',
+      isTextBox: true,
     });
   }
 
@@ -105,13 +108,16 @@ export async function generatePptx(
   const toX = (v: number) => offX + toIn(v);
   const toY = (v: number) => offY + toIn(v);
 
-  // 连线：正交折线 + 汇聚总线 + 箭头
+  // 连线：正交折线 + 汇聚总线 + 箭头。
+  // OOXML 中 a:ext 的 cx/cy 必须 >= 0（ST_PositiveCoordinate），
+  // 反向线段（x2<x1 或 y2<y1）必须归一化为最小角坐标 + 绝对值尺寸，
+  // 否则 PowerPoint 会判定内容损坏并弹出修复提示。
   for (const s of opts.layout.segments) {
     const lineOpts: Record<string, unknown> = {
-      x: toX(s.x1),
-      y: toY(s.y1),
-      w: toIn(s.x2 - s.x1),
-      h: toIn(s.y2 - s.y1),
+      x: toX(Math.min(s.x1, s.x2)),
+      y: toY(Math.min(s.y1, s.y2)),
+      w: toIn(Math.abs(s.x2 - s.x1)),
+      h: toIn(Math.abs(s.y2 - s.y1)),
       line: {
         color: EDGE_COLOR,
         width: 1.3,
@@ -125,8 +131,8 @@ export async function generatePptx(
   for (const n of opts.layout.nodes) {
     const x = toX(n.x);
     const y = toY(n.y);
-    const w = toIn(n.w);
-    const h = toIn(n.h);
+    const w = Math.max(toIn(n.w), 0.02);
+    const h = Math.max(toIn(n.h), 0.02);
     const regPt = n.regPlace
       ? fitFont([`${REG_PREFIX}${n.regPlace}`], w, h, toPt(10), 10)
       : 0;
@@ -159,6 +165,7 @@ export async function generatePptx(
       y,
       w,
       h,
+      isTextBox: true,
       shape: 'roundRect',
       rectRadius: 0.06,
       line: {
@@ -181,14 +188,15 @@ export async function generatePptx(
     slide.addText(l.text, {
       x: toX(l.x),
       y: toY(l.y),
-      w: toIn(l.w),
-      h: toIn(l.h),
+      w: Math.max(toIn(l.w), 0.02),
+      h: Math.max(toIn(l.h), 0.02),
       fontSize,
       bold: true,
       color: '000000',
       align: 'center',
       valign: 'middle',
       fontFace: 'Microsoft YaHei',
+      isTextBox: true,
       margin: 0,
       wrap: false,
     });
@@ -198,10 +206,10 @@ export async function generatePptx(
   if (opts.layout.boundary) {
     const b = opts.layout.boundary;
     slide.addShape(pptx.ShapeType.line as never, {
-      x: toX(b.x1),
+      x: toX(Math.min(b.x1, b.x2)),
       y: toY(b.y),
-      w: toIn(b.x2 - b.x1),
-      h: 0,
+      w: toIn(Math.abs(b.x2 - b.x1)),
+      h: Math.max(toIn(0), 0.01),
       line: {
         color: BOUNDARY_COLOR,
         width: 1.1,
@@ -218,6 +226,7 @@ export async function generatePptx(
       align: 'left',
       valign: 'middle',
       fontFace: 'Microsoft YaHei',
+      isTextBox: true,
     });
     slide.addText('境内', {
       x: toX(b.x1),
@@ -229,6 +238,7 @@ export async function generatePptx(
       align: 'left',
       valign: 'middle',
       fontFace: 'Microsoft YaHei',
+      isTextBox: true,
     });
   }
 
@@ -244,6 +254,7 @@ export async function generatePptx(
       color: 'A6A6A6',
       align: 'center',
       fontFace: 'Microsoft YaHei',
+      isTextBox: true,
     },
   );
 
