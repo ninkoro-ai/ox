@@ -53,14 +53,18 @@ describe('银行授信股权穿透规则', () => {
     }
   });
 
-  it('第一层等于阈值（25%）不触发控制链；超过阈值才继续穿透', () => {
+  it('第一层持股达到阈值（25%）即触发控制链；低于阈值才不穿透', () => {
     const t = tree([
       { investor: 'A公司', investee: '目标公司', ratio: 80 },
       { investor: 'B公司', investee: '目标公司', ratio: 25 },
+      { investor: 'E公司', investee: '目标公司', ratio: 24 },
       { investor: 'C公司', investee: 'A公司', ratio: 26 },
       { investor: 'D公司', investee: 'C公司', ratio: 100 },
     ]);
-    expect(t.nodes.find((n) => n.name === 'B公司')?.stopReason).toBe('below-threshold');
+    // 25% 触发穿透（B 无上层股东，故为 no-shareholders）
+    expect(t.nodes.find((n) => n.name === 'B公司')?.stopReason).toBe('no-shareholders');
+    // 24% 低于阈值，不再穿透
+    expect(t.nodes.find((n) => n.name === 'E公司')?.stopReason).toBe('below-threshold');
     expect(t.nodes.find((n) => n.name === 'C公司')?.stopReason).toBe('expanded');
   });
 
@@ -76,6 +80,58 @@ describe('银行授信股权穿透规则', () => {
     expect(t.nodes.find((n) => n.name === '张三')?.level).toBe(3);
     expect(t.nodes.find((n) => n.name === '张三')?.stopReason).toBe('natural-person');
     expect(t.nodes.find((n) => n.name === '李四')?.level).toBe(3);
+  });
+
+  it('受益所有人：多路径综合持股超过 25% 的自然人识别为受益所有人', () => {
+    const t = tree([
+      { investor: 'A公司', investee: '目标公司', ratio: 40 },
+      { investor: 'B公司', investee: '目标公司', ratio: 30 },
+      { investor: '张三', investee: 'A公司', ratio: 50 },
+      { investor: '张三', investee: 'B公司', ratio: 50 },
+      { investor: '李四', investee: 'A公司', ratio: 50 },
+    ]);
+    // 张三综合持股 = 40%*50% + 30%*50% = 35% > 25%
+    const zs = t.nodes.find((n) => n.name === '张三');
+    expect(zs?.stopReason).toBe('natural-person');
+    // 李四综合持股 = 40%*50% = 20% ≤ 25%，不是受益所有人
+    expect(t.warnings.some((w) => w.includes('张三') && w.includes('35.00'))).toBe(true);
+    expect(t.warnings.some((w) => w.includes('李四'))).toBe(false);
+  });
+
+  it('受益所有人：持股路径超过三层时折叠为单个节点直接显示综合持股比例', () => {
+    const t = tree([
+      { investor: 'A公司', investee: '目标公司', ratio: 60 },
+      { investor: 'B公司', investee: 'A公司', ratio: 100 },
+      { investor: 'C公司', investee: 'B公司', ratio: 100 },
+      { investor: 'D公司', investee: 'C公司', ratio: 100 },
+      { investor: 'E公司', investee: 'D公司', ratio: 100 },
+      { investor: '张三', investee: 'E公司', ratio: 100 },
+    ]);
+    // 张三综合持股 = 60%，路径 6 层 > 3 层，折叠为 level 4 的单个节点
+    const collapsed = t.nodes.find((n) => n.name.includes('张三') && n.name.includes('综合持股'));
+    expect(collapsed).toBeDefined();
+    expect(collapsed?.level).toBe(4);
+    expect(collapsed?.ratioText).toBe('综合60.00%');
+    // 3 层以内的路径（A/B/C）保留，4 层以上的深链（D/E/自然人）折叠移除
+    expect(t.nodes.some((n) => n.name === 'B公司')).toBe(true);
+    expect(t.nodes.some((n) => n.name === 'C公司')).toBe(true);
+    expect(t.nodes.some((n) => n.name === 'D公司')).toBe(false);
+    expect(t.nodes.some((n) => n.name === 'E公司')).toBe(false);
+    expect(t.nodes.some((n) => n.name === '张三' && !n.name.includes('综合持股'))).toBe(false);
+    expect(t.warnings.some((w) => w.includes('折叠'))).toBe(true);
+  });
+
+  it('受益所有人：路径不超过三层时保留完整路径', () => {
+    const t = tree([
+      { investor: 'A公司', investee: '目标公司', ratio: 70 },
+      { investor: 'B公司', investee: 'A公司', ratio: 100 },
+      { investor: '张三', investee: 'B公司', ratio: 100 },
+    ]);
+    // 张三综合持股 70% > 25%，路径 3 层 ≤ 3，保留完整链
+    expect(t.nodes.some((n) => n.name === 'B公司')).toBe(true);
+    expect(t.nodes.find((n) => n.name === '张三')?.level).toBe(3);
+    expect(t.nodes.some((n) => n.name.includes('综合持股'))).toBe(false);
+    expect(t.warnings.some((w) => w.includes('张三') && w.includes('70.00'))).toBe(true);
   });
 
   it('重复股东只列示一次，并补充完整持股路径', () => {

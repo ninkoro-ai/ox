@@ -45,6 +45,7 @@ export default function SettingsPanel({ settings, onChange, disabled }: Props) {
   return (
     <div className="card">
       <h3>穿透与版式设置</h3>
+      <p className="settings-hint">调整任意设置后，预览与导出的 PPT 都会立即按最新参数重新生成。</p>
       <div className="settings-grid">
         <label>
           穿透阈值（%）

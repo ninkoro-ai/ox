@@ -6,7 +6,7 @@ import type {
   TreeEdge,
   TreeNode,
 } from '../types';
-import { formatRatio } from '../excel/ratio';
+import { formatNum, formatRatio } from '../excel/ratio';
 import { inferRegPlace, isLikelyNaturalPerson, isLikelyOverseas } from './classify';
 
 export function stopTag(): string | undefined {
@@ -86,7 +86,8 @@ export function buildEquityTree(
       const ratio = rel.ratio;
       // 穿透规则：任一层的单一持股超过阈值（默认 25%）就继续向上穿透，
       // 超过 25% 的第一层直接股东形成的控制链，将一直向上穿透至境外公司或个人股东
-      const below = ratio === null ? true : ratio <= opts.threshold;
+      // 持股 ≥ 阈值（默认 25%）即继续穿透
+      const below = ratio === null ? true : ratio < opts.threshold;
       const deep = curNode.isTarget ? !below : cur.deep || !below;
       const display = curNode.isTarget ? true : deep ? true : !below || opts.showBelowThreshold;
       if (!display) continue;
@@ -176,6 +177,124 @@ export function buildEquityTree(
   const warnings: string[] = [];
   if (unknownCount > 0) warnings.push(`存在 ${unknownCount} 条持股比例不详的股东关系，已按“未穿透”处理`);
   if (skippedByCycle > 0) warnings.push(`检测到 ${skippedByCycle} 条循环持股关系，已自动截断`);
+
+  // —— 受益所有人识别：综合持股 = 自然人股东经全部持股路径对目标企业的持股之和 ——
+  // 综合持股 > 阈值（默认 25%）的自然人即受益所有人；持股路径 ≤ 3 层时画出完整路径，
+  // 超过 3 层时折叠为单个节点直接显示综合持股比例，避免深链影响图面可读性
+  const aggMemo = new Map<string, number | null>();
+  const aggregateOf = (id: string, visiting: Set<string>): number | null => {
+    if (id === rootId) return 100;
+    const cached = aggMemo.get(id);
+    if (cached !== undefined) return cached;
+    if (visiting.has(id)) return null;
+    visiting.add(id);
+    let sum = 0;
+    let anyKnown = false;
+    for (const e of edges) {
+      if (e.fromId !== id || e.ratio === null) continue;
+      const parentAgg = aggregateOf(e.toId, visiting);
+      if (parentAgg === null) continue;
+      anyKnown = true;
+      sum += (e.ratio * parentAgg) / 100;
+    }
+    visiting.delete(id);
+    const result = anyKnown ? sum : null;
+    aggMemo.set(id, result);
+    return result;
+  };
+
+  const beneficialIds: string[] = [];
+  for (const n of nodes) {
+    if (n.stopReason !== 'natural-person') continue;
+    const agg = aggregateOf(n.id, new Set());
+    if (agg !== null && agg > opts.threshold) beneficialIds.push(n.id);
+  }
+
+  if (beneficialIds.length > 0) {
+    const removed = new Set<string>();
+    for (const pid of beneficialIds) {
+      const p = nodeOf.get(pid)!;
+      const agg = aggregateOf(pid, new Set())!;
+      if (p.level <= 3) {
+        warnings.push(`识别到受益所有人：${p.name}（综合持股${formatNum(agg, precision)}%）`);
+        continue;
+      }
+      // 尝试安全折叠：路径各级均为单分支且未被共享
+      const chain: TreeNode[] = [p];
+      const onPath = new Set<string>([p.id]);
+      let cur: TreeNode | undefined = p;
+      let a3: TreeNode | undefined;
+      let safe = true;
+      while (cur && cur.level > 3) {
+        const cn = cur as TreeNode;
+        if (cn.children.some((cc) => !onPath.has(cc) && !removed.has(cc))) {
+          safe = false;
+          break;
+        }
+        const parents = edges.filter((e) => e.fromId === cn.id).map((e) => e.toId);
+        if (parents.length !== 1) {
+          safe = false;
+          break;
+        }
+        const parent = nodeOf.get(parents[0])!;
+        if (parent.level > 3) {
+          if (parent.children.some((cc) => cc !== cn.id && !onPath.has(cc))) {
+            safe = false;
+            break;
+          }
+          chain.push(parent);
+          onPath.add(parent.id);
+          cur = parent;
+        } else {
+          a3 = parent;
+          cur = undefined;
+        }
+      }
+      if (!safe || !a3) {
+        // 无法折叠时在自然人节点上直接标注综合持股比例
+        p.name = `${p.name}（综合持股${formatNum(agg, precision)}%）`;
+        p.ratioText = `综合${formatNum(agg, precision)}%`;
+        warnings.push(`识别到受益所有人：${p.name}（持股路径超过三层，直接列示综合持股）`);
+        continue;
+      }
+      // 折叠：删除 4 层及以上的整条链，替换为单个“自然人（综合持股X%）”节点
+      for (const cn of chain) removed.add(cn.id);
+      const collapsedId = `bo${counter++}`;
+      const collapsed: TreeNode = {
+        id: collapsedId,
+        name: `${p.name}（综合持股${formatNum(agg, precision)}%）`,
+        parentId: a3.id,
+        level: a3.level + 1,
+        ratio: agg,
+        ratioText: `综合${formatNum(agg, precision)}%`,
+        stopReason: 'natural-person',
+        children: [],
+        isTarget: false,
+        isMerged: false,
+        mergedCount: 1,
+        mergedSum: null,
+        regPlace: undefined,
+      };
+      nodes.push(collapsed);
+      nodeOf.set(collapsedId, collapsed);
+      a3.children = a3.children.filter((c) => !removed.has(c)).concat(collapsedId);
+      edges.push({
+        fromId: collapsedId,
+        toId: a3.id,
+        ratio: agg,
+        label: `综合${formatNum(agg, precision)}%`,
+      });
+      warnings.push(`识别到受益所有人：${p.name}（综合持股${formatNum(agg, precision)}%，路径超过三层，折叠列示）`);
+    }
+    if (removed.size > 0) {
+      nodes.splice(0, nodes.length, ...nodes.filter((n) => !removed.has(n.id)));
+      edges.splice(
+        0,
+        edges.length,
+        ...edges.filter((e) => !removed.has(e.fromId) && !removed.has(e.toId)),
+      );
+    }
+  }
 
   return { targetName, nodes, edges, stats, warnings };
 }
