@@ -1,6 +1,6 @@
 import type { LayoutResult } from '../types';
 import { BOUNDARY_COLOR, EDGE_COLOR, NODE_BORDER, NODE_TEXT, TAG_TEXT } from '../theme';
-import { REG_PREFIX } from '../layout/measure';
+import { RATIO_AREA_H, REG_PREFIX } from '../layout/measure';
 
 function esc(s: string): string {
   return s
@@ -31,8 +31,10 @@ export function renderChartSvg(layout: LayoutResult, threshold: number): string 
   }
 
   for (const n of layout.nodes) {
+    // 节点高度包含比例区：边框只包住名称/注册地，比例固定显示在框正下方
+    const boxH = n.h - (n.ratioText && n.ratioText !== '—' ? RATIO_AREA_H : 0);
     parts.push(
-      `<rect x="${n.x}" y="${n.y}" width="${n.w}" height="${n.h}" rx="6" fill="none" stroke="#${NODE_BORDER}" stroke-width="${n.isTarget ? '1.8' : '1.2'}"/>`,
+      `<rect x="${n.x}" y="${n.y}" width="${n.w}" height="${boxH}" rx="6" fill="none" stroke="#${NODE_BORDER}" stroke-width="${n.isTarget ? '1.8' : '1.2'}"/>`,
     );
     const cx = n.x + n.w / 2;
     // 名称 + 注册地 + 标签整体在文本框内上下居中
@@ -40,7 +42,7 @@ export function renderChartSvg(layout: LayoutResult, threshold: number): string 
     const regPx = n.regPlace ? 13 : 0;
     const tagPx = n.tag ? 13 : 0;
     const contentPx = namePx + regPx + tagPx;
-    let ty = n.y + Math.max(0, (n.h - contentPx) / 2) + 13;
+    let ty = n.y + Math.max(0, (boxH - contentPx) / 2) + 13;
     for (let i = 0; i < n.lines.length; i++) {
       const y = ty + i * 17;
       parts.push(
@@ -60,15 +62,11 @@ export function renderChartSvg(layout: LayoutResult, threshold: number): string 
       );
       ty += tagPx;
     }
-  }
-
-  // 持股比例：独立于文本框，位于连接线两侧
-  for (const l of layout.labels ?? []) {
-    const cx = l.x + l.w / 2;
-    const cy = l.y + l.h / 2;
-    parts.push(
-      `<text x="${cx}" y="${cy + 3.5}" text-anchor="middle" font-size="10" fill="#000000" font-weight="600">${esc(l.text)}</text>`,
-    );
+    if (n.ratioText && n.ratioText !== '—') {
+      parts.push(
+        `<text x="${cx}" y="${n.y + n.h - 4}" text-anchor="middle" font-size="10" fill="#000000" font-weight="600">${esc(n.ratioText)}</text>`,
+      );
+    }
   }
 
   // 境内 / 境外分隔虚线

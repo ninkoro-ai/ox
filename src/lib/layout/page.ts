@@ -227,9 +227,10 @@ export function fitLayout(tree: EquityTree, opts: FitOptions): FitResult {
   // 比例标签：A4（紧凑）统一右侧，16:9 / A3 左右交替
   const layout = attachRatioLabels(chosen.layout, chosen.page === 'a4' ? 'right' : 'both');
   const page = chosen.page;
-  // 最终缩放：可读时按上限放大，放不下时绝不超出页面范围
+  // 最终缩放：图表整体面积约占页面 4/5（线性约 89.4%），不铺满整页；
+  // 内容过小时仍按可读上限，放不下时绝不超出页面范围
   const fitScale = scaleFor(page, layout);
-  const s = Math.min(clampScale(fitScale), fitScale);
+  const s = Math.min(clampScale(fitScale) * 0.894, fitScale);
   if (fitScale < MIN_ALLOWED) {
     warnings.push('内容较多，图表已按最小可读尺寸缩放；建议切换纵向文本框或调低合并阈值/拆分展示');
   }

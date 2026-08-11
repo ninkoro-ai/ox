@@ -11,6 +11,7 @@ export const REG_PREFIX = '注册地：';
 export const RATIO_FONT_SIZE = 10;
 export const RATIO_LABEL_H = 16;
 export const RATIO_LABEL_PAD = 6;
+export const RATIO_AREA_H = 16; // 持股比例区：位于文本框正下方
 export const MAX_NODE_W = 280; // 公司文本框宽度上限，尽量让名称显示在一行
 
 export function textWidth(text: string, fontSize: number = FONT_SIZE): number {

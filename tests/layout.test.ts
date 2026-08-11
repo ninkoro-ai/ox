@@ -41,9 +41,10 @@ describe('布局引擎', () => {
     expect(report.labelNodeHits).toBe(0);
     expect(report.labelOverlaps).toBe(0);
     expect(report.labelSegmentHits).toBe(0);
-    // A4 紧凑版面：比例统一在连接线右侧
-    expect(fit.layout.labels.length).toBeGreaterThan(0);
-    expect(fit.layout.labels.every((l) => l.side === 'right')).toBe(true);
+    // 持股比例固定显示在文本框正下方（不再生成连线旁标签）
+    expect(fit.layout.labels.length).toBe(0);
+    const hasRatio = fit.layout.nodes.find((n) => n.ratioText && n.ratioText !== '—')!;
+    expect(hasRatio.h).toBeGreaterThan(hasRatio.lines.length * 17);
     // 有境外股东时绘制境内外分隔虚线
     expect(fit.layout.boundary).not.toBeNull();
     // 同一层股东文本框等宽；除超长名称外尽量单行
@@ -204,5 +205,33 @@ describe('布局引擎', () => {
     expect(fitV.layout.height * fitV.pxToIn).toBeLessThanOrEqual(pageV.hIn + 0.01);
     const longV = fitV.layout.nodes.find((n) => n.name.includes('大型股权投资'))!;
     expect(longV.lines.length).toBeGreaterThanOrEqual([...longV.name].length - 1);
+  });
+
+  it('股东较多时持股小于5%的股东使用纵向文本框，其余横向', () => {
+    const relations: EquityRelation[] = [];
+    for (let i = 1; i <= 9; i++) {
+      relations.push({ investor: `股东${i}号某某投资有限公司`, investee: '目标公司', ratio: i });
+    }
+    const tree = makeTree(relations);
+    const fit = fitLayout(tree, {
+      pageMode: 'auto',
+      mergeRatio: 25,
+      autoMerge: false,
+      showRegPlace: true,
+      mergeBelow: false,
+      ratioPrecision: 2,
+      verticalText: false,
+    });
+    const ratioByName = new Map(tree.nodes.map((n) => [n.name, n.ratio]));
+    const level1 = fit.layout.nodes.filter((n) => n.level === 1);
+    const small = level1.filter((n) => (ratioByName.get(n.name) ?? 100) < 5);
+    const big = level1.filter((n) => (ratioByName.get(n.name) ?? 100) >= 5);
+    expect(small.length).toBe(4);
+    expect(big.length).toBe(5);
+    for (const n of small) expect(n.lines.length).toBeGreaterThanOrEqual([...n.name].length - 1);
+    for (const n of big) expect(n.lines.length).toBeLessThan([...n.name].length - 1);
+    const report = checkLayout(fit.layout);
+    expect(report.nodeOverlaps).toBe(0);
+    expect(report.segmentNodeHits).toBe(0);
   });
 });
