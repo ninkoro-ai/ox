@@ -1,7 +1,7 @@
 import PptxGenJS from 'pptxgenjs';
 import type { EquityTree, LayoutResult, PageKey } from '../types';
 import { PAGES } from '../layout/page';
-import { RATIO_AREA_H, REG_PREFIX, textWidth } from '../layout/measure';
+import { REG_PREFIX, textWidth } from '../layout/measure';
 import { BOUNDARY_COLOR, EDGE_COLOR, NODE_BORDER, NODE_TEXT, TAG_TEXT } from '../theme';
 
 export interface GeneratePptOptions {
@@ -114,9 +114,7 @@ export async function generatePptx(
     const x = toX(n.x);
     const y = toY(n.y);
     const w = toIn(n.w);
-    // 节点高度包含比例区：边框只包住名称/注册地，比例固定显示在框正下方
-    const ratioIn = toIn(RATIO_AREA_H);
-    const h = Math.max(toIn(n.h) - ratioIn, 0.2);
+    const h = toIn(n.h);
     const runs: PptxGenJS.TextProps[] = [
       {
         text: n.lines.join('\n'),
@@ -158,22 +156,25 @@ export async function generatePptx(
       wrap: true,
       lineSpacingMultiple: 1.0,
     });
-    if (n.ratioText && n.ratioText !== '—') {
-      slide.addText(n.ratioText, {
-        x,
-        y: y + h,
-        w,
-        h: ratioIn,
-        fontSize: fitRatioPt(n.ratioText, w),
-        bold: true,
-        color: '000000',
-        align: 'center',
-        valign: 'middle',
-        fontFace: 'Microsoft YaHei',
-        margin: 0,
-        wrap: false,
-      });
-    }
+  }
+
+  // 持股比例：位于股权线两侧、线中间位置（左下/右下方位），不与线相交
+  for (const l of opts.layout.labels ?? []) {
+    const fontSize = fitRatioPt(l.text, toIn(l.w));
+    slide.addText(l.text, {
+      x: toX(l.x),
+      y: toY(l.y),
+      w: toIn(l.w),
+      h: toIn(l.h),
+      fontSize,
+      bold: true,
+      color: '000000',
+      align: 'center',
+      valign: 'middle',
+      fontFace: 'Microsoft YaHei',
+      margin: 0,
+      wrap: false,
+    });
   }
 
   // 境内 / 境外分隔虚线

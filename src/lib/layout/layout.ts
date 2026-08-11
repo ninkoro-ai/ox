@@ -9,7 +9,7 @@ import type {
   RatioLabelSide,
   TreeNode,
 } from '../types';
-import { nodeSize, nodeSizeForWidth, RATIO_AREA_H } from './measure';
+import { nodeSize, nodeSizeForWidth, ratioLabelSize } from './measure';
 import { checkLayout, segIntersectsRectStrict } from './collision';
 
 export interface LayoutConfig {
@@ -18,7 +18,7 @@ export interface LayoutConfig {
   margin: { top: number; bottom: number; left: number; right: number };
   showRegPlace?: boolean; // 是否在文本框内展示注册地
   zoneSplit?: boolean; // 境内外分区布局（境外在上、虚线分隔、境内在下）
-  verticalNames?: boolean; // 横向放不下时：公司名称纵向排版（一字一行）压缩宽度
+  textLayout?: 'horizontal' | 'vertical' | 'combo'; // 文本框方向：横向/纵向/横向+纵向组合
 }
 
 export const DEFAULT_LAYOUT_CONFIG: LayoutConfig = {
@@ -27,7 +27,7 @@ export const DEFAULT_LAYOUT_CONFIG: LayoutConfig = {
   margin: { top: 40, bottom: 40, left: 50, right: 50 },
   showRegPlace: true,
   zoneSplit: true,
-  verticalNames: false,
+  textLayout: 'horizontal',
 };
 
 export function layoutTree(
@@ -36,8 +36,13 @@ export function layoutTree(
   depth = 0,
 ): LayoutResult {
   const showRegPlace = cfg.showRegPlace ?? true;
-  const verticalNames = cfg.verticalNames ?? false;
-  const regForSize = showRegPlace && !verticalNames;
+  const textLayout = cfg.textLayout ?? 'horizontal';
+  const levelCount = (level: number) => levelIds[level]?.length ?? 0;
+  // 纵向排版：用户选择“纵向”时全部纵向；组合模式下股东较多且持股 <5% 的股东纵向
+  const vertOf = (n: TreeNode) =>
+    textLayout === 'vertical' ||
+    (textLayout === 'combo' && levelCount(n.level) >= MANY_SHAREHOLDERS && n.ratio !== null && n.ratio < SMALL_RATIO);
+  const regOf = (n: TreeNode) => (showRegPlace && !vertOf(n) ? n.regPlace : undefined);
   const root = tree.nodes.find((n) => n.isTarget);
   if (!root) throw new Error('树中缺少目标企业节点');
 
@@ -61,7 +66,7 @@ export function layoutTree(
   const nodeOf = new Map<string, TreeNode>(tree.nodes.map((n) => [n.id, n]));
   const sizes = new Map<string, { w: number; h: number; lines: string[] }>();
   for (const n of tree.nodes) {
-    sizes.set(n.id, nodeSize(n.name, regForSize ? n.regPlace : undefined, n.tag));
+    sizes.set(n.id, nodeSize(n.name, regOf(n), n.tag));
   }
 
   // 文字方向规则：
@@ -74,7 +79,8 @@ export function layoutTree(
       const r = nodeOf.get(id)!.ratio;
       return r !== null && r < SMALL_RATIO;
     });
-    if (verticalNames) {
+    const combo = textLayout === 'combo' && many && hasSmall;
+    if (textLayout === 'vertical') {
       const targetW = Math.min(Math.max(...ids.map((id) => sizes.get(id)!.w)), VERTICAL_NAME_W);
       const remeasured = ids.map((id) => {
         const n = nodeOf.get(id)!;
@@ -84,7 +90,7 @@ export function layoutTree(
       ids.forEach((id, i) => {
         sizes.set(id, { ...remeasured[i], h: Math.max(remeasured[i].h, targetH) });
       });
-    } else if (many && hasSmall) {
+    } else if (combo) {
       // 混合模式：持股 < 5% 的股东纵向排版，其余保留横向自然尺寸
       for (const id of ids) {
         const n = nodeOf.get(id)!;
@@ -97,7 +103,7 @@ export function layoutTree(
       const targetW = Math.max(...ids.map((id) => sizes.get(id)!.w));
       const remeasured = ids.map((id) => {
         const n = nodeOf.get(id)!;
-        return nodeSizeForWidth(n.name, regForSize ? n.regPlace : undefined, n.tag, targetW);
+        return nodeSizeForWidth(n.name, regOf(n), n.tag, targetW);
       });
       const targetH = Math.max(...remeasured.map((s) => s.h));
       ids.forEach((id, i) => {
@@ -106,13 +112,6 @@ export function layoutTree(
     }
   }
 
-  // 持股比例区：位于文本框正下方（计入节点高度，连线从其下方引出，互不相交）
-  for (const id of sizes.keys()) {
-    const n = nodeOf.get(id)!;
-    if (n.ratioText && n.ratioText !== '—') {
-      sizes.set(id, { ...sizes.get(id)!, h: sizes.get(id)!.h + RATIO_AREA_H });
-    }
-  }
 
   // 槽位布局（两遍）：
   // 第一遍自底向上计算每个节点的槽位宽度 = max(自身宽度, 子槽位总宽+间距)；
@@ -181,7 +180,7 @@ export function layoutTree(
       ratioText: n.ratioText,
       stopReason: n.stopReason,
       tag: n.tag,
-      regPlace: regForSize ? n.regPlace : undefined,
+      regPlace: regOf(n),
       isTarget: n.isTarget,
       isMerged: n.isMerged,
     });
@@ -445,8 +444,99 @@ export function attachRatioLabels(
     }
   }
 
-  // 持股比例固定显示在文本框正下方（计入节点高度），不再生成连线旁标签
+  // 持股比例：显示在股权线两侧、线中间位置（左下方/右下方方位），始终不与线相交
   const labels: RatioLabel[] = [];
+  const byTo = new Map<string, Array<{ fromId: string; text: string }>>();
+  for (const e of layout.edges) {
+    const list = byTo.get(e.toId);
+    if (list) list.push({ fromId: e.fromId, text: e.label });
+    else byTo.set(e.toId, [{ fromId: e.fromId, text: e.label }]);
+  }
+  for (const [toId, incoming] of byTo) {
+    const to = byId.get(toId);
+    if (!to) continue;
+    const ordered = incoming
+      .map((e) => {
+        const from = byId.get(e.fromId);
+        return from ? { ...e, from } : null;
+      })
+      .filter((e): e is { fromId: string; text: string; from: LayoutNode } => e !== null)
+      .sort((a, b) => a.from.x - b.from.x);
+
+    ordered.forEach((e, i) => {
+      const text = e.text;
+      if (!text || text === '—' || text === '不详') return;
+      const candidates = layout.segments.filter(
+        (s) => (s.kind === 'drop' || s.kind === 'entry') && s.edgeId === e.fromId,
+      );
+      if (candidates.length === 0) return;
+      const seg = candidates.reduce((best, s) =>
+        Math.abs(s.x2 - s.x1) + Math.abs(s.y2 - s.y1) >
+        Math.abs(best.x2 - best.x1) + Math.abs(best.y2 - best.y1)
+          ? s
+          : best,
+      );
+
+      let anchorY = (seg.y1 + seg.y2) / 2; // 线中间位置
+      if (boundary && seg.y1 < boundary.y && seg.y2 > boundary.y) {
+        anchorY = Math.min(boundary.y + 12, seg.y2 - 10);
+      }
+      const size = ratioLabelSize(text);
+      const preferred: RatioLabelSide = sideMode === 'right' ? 'right' : i % 2 === 0 ? 'left' : 'right';
+      // 候选位置：优先同侧，必要时加大间距/上下偏移/换到另一侧，避免与连线或文本框重合
+      const placements: Array<{ side: RatioLabelSide; dy: number; gap: number }> =
+        sideMode === 'right'
+          ? [
+              { side: 'right', dy: 0, gap: LABEL_GAP },
+              { side: 'right', dy: 0, gap: LABEL_GAP + 10 },
+              { side: 'right', dy: -10, gap: LABEL_GAP },
+              { side: 'right', dy: 10, gap: LABEL_GAP },
+              { side: 'right', dy: -20, gap: LABEL_GAP },
+              { side: 'right', dy: 20, gap: LABEL_GAP },
+            ]
+          : [
+              { side: preferred, dy: 0, gap: LABEL_GAP },
+              { side: preferred, dy: 0, gap: LABEL_GAP + 10 },
+              { side: preferred, dy: -10, gap: LABEL_GAP },
+              { side: preferred, dy: 10, gap: LABEL_GAP },
+              { side: preferred === 'left' ? 'right' : 'left', dy: 0, gap: LABEL_GAP },
+              { side: preferred === 'left' ? 'right' : 'left', dy: 0, gap: LABEL_GAP + 10 },
+              { side: preferred, dy: -20, gap: LABEL_GAP },
+              { side: preferred, dy: 20, gap: LABEL_GAP },
+            ];
+      let chosen: { x: number; y: number; side: RatioLabelSide } | null = null;
+      for (const c of placements) {
+        const cx = c.side === 'left' ? seg.x1 - c.gap - size.w : seg.x1 + c.gap;
+        const cy = anchorY + c.dy - size.h / 2;
+        const rect = { x: cx, y: cy, w: size.w, h: size.h };
+        const hitNode = layout.nodes.some((n) => rectsOverlap(rect, { x: n.x, y: n.y, w: n.w, h: n.h }));
+        const hitSeg = layout.segments.some((s) => segIntersectsRectStrict(s.x1, s.y1, s.x2, s.y2, rect));
+        const hitLabel = labels.some((l) => rectsOverlap(rect, { x: l.x, y: l.y, w: l.w, h: l.h }));
+        if (!hitNode && !hitSeg && !hitLabel) {
+          chosen = { x: cx, y: cy, side: c.side };
+          break;
+        }
+      }
+      if (!chosen) {
+        chosen = {
+          x: preferred === 'left' ? seg.x1 - LABEL_GAP - size.w : seg.x1 + LABEL_GAP,
+          y: anchorY - size.h / 2,
+          side: preferred,
+        };
+      }
+      labels.push({
+        edgeId: e.fromId,
+        text,
+        x: chosen.x,
+        y: chosen.y,
+        w: size.w,
+        h: size.h,
+        side: chosen.side,
+        anchorX: seg.x1,
+        anchorY,
+      });
+    });
+  }
 
   // 把标签与分隔线纳入画布边界，避免被页面裁切
   const margin = DEFAULT_LAYOUT_CONFIG.margin;

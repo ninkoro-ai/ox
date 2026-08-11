@@ -40,7 +40,7 @@ export interface FitOptions {
   showRegPlace: boolean;
   mergeBelow: boolean; // 生成前按用户阈值归并低比例股东
   ratioPrecision: number; // 持股比例小数位
-  verticalText?: boolean; // 文本框文字方向：true=纵向（一字一行），默认横向
+  textLayout?: 'horizontal' | 'vertical' | 'combo'; // 文本框方向：横向/纵向/横向+纵向组合
 }
 
 export interface FitResult {
@@ -180,12 +180,12 @@ export function fitLayout(tree: EquityTree, opts: FitOptions): FitResult {
 
   const tryPage = (
     t: EquityTree,
-    verticalNames = false,
+    textLayout: 'horizontal' | 'vertical' | 'combo' = 'horizontal',
   ): { page: PageKey; layout: LayoutResult; scale: number } | null => {
     const layout = layoutTree(t, {
       ...DEFAULT_LAYOUT_CONFIG,
       showRegPlace: opts.showRegPlace,
-      verticalNames,
+      textLayout,
     });
     if (opts.pageMode === 'auto') {
       // 简单结构优先 A4（约半张 A4 的紧凑版面），放不下再依次尝试 16:9、A3
@@ -202,7 +202,7 @@ export function fitLayout(tree: EquityTree, opts: FitOptions): FitResult {
 
   let chosen: { page: PageKey; layout: LayoutResult; scale: number } | null = null;
   for (let attempt = 0; attempt < 4; attempt++) {
-    const hit = tryPage(current, opts.verticalText ?? false);
+    const hit = tryPage(current, opts.textLayout ?? 'horizontal');
     if (hit) {
       chosen = { page: hit.page, layout: hit.layout, scale: hit.scale };
       break;
@@ -219,7 +219,7 @@ export function fitLayout(tree: EquityTree, opts: FitOptions): FitResult {
     const layout = layoutTree(current, {
       ...DEFAULT_LAYOUT_CONFIG,
       showRegPlace: opts.showRegPlace,
-      verticalNames: opts.verticalText ?? false,
+      textLayout: opts.textLayout ?? 'horizontal',
     });
     chosen = { page, layout, scale: scaleFor(page, layout) };
   }

@@ -53,9 +53,9 @@ export default function App() {
       showRegPlace: settings.showRegPlace,
       mergeBelow: settings.mergeBelow,
       ratioPrecision: settings.ratioPrecision,
-      verticalText: settings.verticalText,
+      textLayout: settings.textLayout,
     });
-  }, [tree, settings.pageMode, settings.mergeRatio, settings.autoMerge, settings.showRegPlace, settings.mergeBelow, settings.ratioPrecision, settings.verticalText]);
+  }, [tree, settings.pageMode, settings.mergeRatio, settings.autoMerge, settings.showRegPlace, settings.mergeBelow, settings.ratioPrecision, settings.textLayout]);
 
   const layoutCheck = useMemo(() => (fit ? checkLayout(fit.layout) : null), [fit]);
   const svg = useMemo(

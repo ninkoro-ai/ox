@@ -10,7 +10,7 @@ export interface SettingsState {
   showRegPlace: boolean;
   mergeBelow: boolean;
   ratioPrecision: number;
-  verticalText: boolean;
+  textLayout: 'horizontal' | 'vertical' | 'combo';
 }
 
 interface Props {
@@ -31,7 +31,7 @@ export const DEFAULT_SETTINGS: SettingsState = {
   showRegPlace: true,
   mergeBelow: false,
   ratioPrecision: 2,
-  verticalText: false,
+  textLayout: 'horizontal',
 };
 
 export default function SettingsPanel({ settings, onChange, disabled }: Props) {
@@ -114,14 +114,15 @@ export default function SettingsPanel({ settings, onChange, disabled }: Props) {
         <label>
           文本框文字方向
           <select
-            value={settings.verticalText ? 'vertical' : 'horizontal'}
+            value={settings.textLayout}
             disabled={disabled}
-            onChange={(e) => set({ verticalText: e.target.value === 'vertical' })}
+            onChange={(e) => set({ textLayout: e.target.value as SettingsState['textLayout'] })}
           >
             <option value="horizontal">横向（名称自动换行）</option>
             <option value="vertical">纵向（名称一字一行）</option>
+            <option value="combo">横向+纵向组合（股东较多时小于5%自动纵向）</option>
           </select>
-          <small>横向放不下时文字自动换行；纵向更省宽度</small>
+          <small>默认横向；组合模式仅在同层股东较多时生效</small>
         </label>
       </div>
       <div className="settings-checks">

@@ -41,10 +41,9 @@ describe('布局引擎', () => {
     expect(report.labelNodeHits).toBe(0);
     expect(report.labelOverlaps).toBe(0);
     expect(report.labelSegmentHits).toBe(0);
-    // 持股比例固定显示在文本框正下方（不再生成连线旁标签）
-    expect(fit.layout.labels.length).toBe(0);
-    const hasRatio = fit.layout.nodes.find((n) => n.ratioText && n.ratioText !== '—')!;
-    expect(hasRatio.h).toBeGreaterThan(hasRatio.lines.length * 17);
+    // A4 紧凑版面：比例统一在连接线右侧（线中间位置）
+    expect(fit.layout.labels.length).toBeGreaterThan(0);
+    expect(fit.layout.labels.every((l) => l.side === 'right')).toBe(true);
     // 有境外股东时绘制境内外分隔虚线
     expect(fit.layout.boundary).not.toBeNull();
     // 同一层股东文本框等宽；除超长名称外尽量单行
@@ -183,7 +182,7 @@ describe('布局引擎', () => {
       showRegPlace: true,
       mergeBelow: false,
       ratioPrecision: 2,
-      verticalText: false,
+      textLayout: 'horizontal',
     });
     const pageH = PAGES[fitH.page];
     expect(fitH.layout.width * fitH.pxToIn).toBeLessThanOrEqual(pageH.wIn + 0.01);
@@ -198,7 +197,7 @@ describe('布局引擎', () => {
       showRegPlace: true,
       mergeBelow: false,
       ratioPrecision: 2,
-      verticalText: true,
+      textLayout: 'vertical',
     });
     const pageV = PAGES[fitV.page];
     expect(fitV.layout.width * fitV.pxToIn).toBeLessThanOrEqual(pageV.wIn + 0.01);
@@ -220,7 +219,7 @@ describe('布局引擎', () => {
       showRegPlace: true,
       mergeBelow: false,
       ratioPrecision: 2,
-      verticalText: false,
+      textLayout: 'combo',
     });
     const ratioByName = new Map(tree.nodes.map((n) => [n.name, n.ratio]));
     const level1 = fit.layout.nodes.filter((n) => n.level === 1);
