@@ -68,6 +68,26 @@ describe('银行授信股权穿透规则', () => {
     expect(t.nodes.find((n) => n.name === 'C公司')?.stopReason).toBe('expanded');
   });
 
+  it('穿透仅对第一层超过阈值的股东生效；第二层不按自身比例单独穿透', () => {
+    // 第一层 20% < 25%：不启动控制链，其上层股东不列示
+    const t = tree([
+      { investor: 'A公司', investee: '目标公司', ratio: 20 },
+      { investor: 'B公司', investee: 'A公司', ratio: 30 },
+      { investor: 'C公司', investee: 'B公司', ratio: 100 },
+    ]);
+    expect(t.nodes.find((n) => n.name === 'A公司')?.stopReason).toBe('below-threshold');
+    expect(t.nodes.some((n) => n.name === 'B公司')).toBe(false);
+    // 对照：第一层 60% > 25% 启动控制链后，第二层 30% 在链上继续穿透至第三层
+    const t2 = tree([
+      { investor: 'A2公司', investee: '目标公司', ratio: 60 },
+      { investor: 'B2公司', investee: 'A2公司', ratio: 30 },
+      { investor: 'C2公司', investee: 'B2公司', ratio: 100 },
+    ]);
+    expect(t2.nodes.find((n) => n.name === 'A2公司')?.stopReason).toBe('expanded');
+    expect(t2.nodes.find((n) => n.name === 'B2公司')?.stopReason).toBe('expanded');
+    expect(t2.nodes.find((n) => n.name === 'C2公司')?.level).toBe(3);
+  });
+
   it('超 25% 控制链向上穿透直至个人股东（贝特莱案例）', () => {
     const t = tree([
       { investor: '探路者控股集团股份有限公司', investee: '目标公司', ratio: 51 },

@@ -22,7 +22,7 @@ interface Props {
 
 export const DEFAULT_SETTINGS: SettingsState = {
   threshold: 25,
-  mergeRatio: 25,
+  mergeRatio: 5,
   mergeStartLevel: 2,
   showBelowThreshold: true,
   stopNatural: true,
@@ -30,7 +30,7 @@ export const DEFAULT_SETTINGS: SettingsState = {
   maxLevel: 20,
   pageMode: 'auto',
   autoMerge: true,
-  showRegPlace: true,
+  showRegPlace: false,
   mergeBelow: false,
   ratioPrecision: 2,
   textLayout: 'horizontal',
@@ -71,7 +71,7 @@ export default function SettingsPanel({ settings, onChange, disabled }: Props) {
             step={5}
             value={settings.mergeRatio}
             disabled={disabled}
-            onChange={(e) => set({ mergeRatio: num(e.target.value, 25, 0, 100) })}
+            onChange={(e) => set({ mergeRatio: num(e.target.value, 5, 0, 100) })}
           />
           <small>持股低于该比例的股东可归并（勾选下方选项）</small>
         </label>

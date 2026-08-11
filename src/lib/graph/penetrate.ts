@@ -84,11 +84,12 @@ export function buildEquityTree(
       seenChild.add(investor);
 
       const ratio = rel.ratio;
-      // 穿透规则：任一层的单一持股超过阈值（默认 25%）就继续向上穿透，
-      // 超过 25% 的第一层直接股东形成的控制链，将一直向上穿透至境外公司或个人股东
-      // 持股 ≥ 阈值（默认 25%）即继续穿透
+      // 穿透规则：仅对第一层中持股 ≥ 阈值（默认 25%）的股东生效。
+      // 第一层达到阈值的股东启动控制链（deep），沿控制链持续向上穿透，
+      // 直至自然人、境外公司或无明确持股比例为止；
+      // 第二层起不再按自身持股比例单独触发穿透，仅在已处于控制链上时继续。
       const below = ratio === null ? true : ratio < opts.threshold;
-      const deep = curNode.isTarget ? !below : cur.deep || !below;
+      const deep = curNode.isTarget ? !below : cur.deep;
       const display = curNode.isTarget ? true : deep ? true : !below || opts.showBelowThreshold;
       if (!display) continue;
 
@@ -99,7 +100,7 @@ export function buildEquityTree(
       if (isPerson) reason = 'natural-person';
       else if (isOverseas) reason = 'overseas';
       else if (ratio === null) reason = 'unknown-ratio';
-      else if (!deep && below) reason = 'below-threshold';
+      else if (!deep) reason = 'below-threshold';
       else reason = 'expanded';
 
       const hasShareholders = (incoming.get(investor) ?? []).some(
