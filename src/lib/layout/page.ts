@@ -116,7 +116,6 @@ export function mergeLowRatio(
         ? `合计${formatNum(knownSum, precision)}%+`
         : `合计${formatNum(knownSum, precision)}%`,
       stopReason: 'merged',
-      tag: '合并股东',
       children: [],
       isTarget: false,
       isMerged: true,
@@ -138,11 +137,17 @@ export function mergeLowRatio(
   }
 
   const finalNodes = nodes.filter((n) => !removed.has(n.id));
+  const finalIds = new Set(finalNodes.map((n) => n.id));
   const edges: TreeEdge[] = [];
+  // 合并节点到其父节点的边
   for (const n of finalNodes) {
-    if (n.parentId && !removed.has(n.parentId)) {
+    if (n.isMerged && n.parentId && finalIds.has(n.parentId)) {
       edges.push({ fromId: n.id, toId: n.parentId, ratio: n.ratio, label: n.ratioText });
     }
+  }
+  // 保留原始边（含去重后共享主体的多路径边）
+  for (const e of tree.edges) {
+    if (finalIds.has(e.fromId) && finalIds.has(e.toId)) edges.push(e);
   }
   const merged = groups > 0;
   return {

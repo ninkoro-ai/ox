@@ -30,7 +30,6 @@ export default function ChartPreview({
     check &&
     check.nodeOverlaps === 0 &&
     check.segmentNodeHits === 0 &&
-    check.segmentCrossings === 0 &&
     check.labelNodeHits === 0 &&
     check.labelOverlaps === 0 &&
     check.labelSegmentHits === 0;

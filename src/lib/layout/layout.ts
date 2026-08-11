@@ -28,7 +28,11 @@ export const DEFAULT_LAYOUT_CONFIG: LayoutConfig = {
   zoneSplit: true,
 };
 
-export function layoutTree(tree: EquityTree, cfg: LayoutConfig = DEFAULT_LAYOUT_CONFIG): LayoutResult {
+export function layoutTree(
+  tree: EquityTree,
+  cfg: LayoutConfig = DEFAULT_LAYOUT_CONFIG,
+  depth = 0,
+): LayoutResult {
   const showRegPlace = cfg.showRegPlace ?? true;
   const root = tree.nodes.find((n) => n.isTarget);
   if (!root) throw new Error('树中缺少目标企业节点');
@@ -37,8 +41,19 @@ export function layoutTree(tree: EquityTree, cfg: LayoutConfig = DEFAULT_LAYOUT_
   const levelIds: string[][] = Array.from({ length: maxLevel + 1 }, () => []);
   for (const n of tree.nodes) levelIds[n.level].push(n.id);
 
+  // 主树：共享主体（去重后多路径）只归属首个父节点用于水平定位，
+  // 其余路径作为补充边绘制完整持股路径
   const childrenOf = new Map<string, string[]>();
-  for (const n of tree.nodes) childrenOf.set(n.id, [...n.children]);
+  const primaryParent = new Map<string, string>();
+  for (const n of tree.nodes) {
+    for (const c of n.children) {
+      if (primaryParent.has(c)) continue;
+      primaryParent.set(c, n.id);
+      const list = childrenOf.get(n.id);
+      if (list) list.push(c);
+      else childrenOf.set(n.id, [c]);
+    }
+  }
   const nodeOf = new Map<string, TreeNode>(tree.nodes.map((n) => [n.id, n]));
   const sizes = new Map<string, { w: number; h: number; lines: string[] }>();
   for (const n of tree.nodes) {
@@ -59,28 +74,40 @@ export function layoutTree(tree: EquityTree, cfg: LayoutConfig = DEFAULT_LAYOUT_
     });
   }
 
-  // 槽位布局：每个节点的槽位宽度 = max(自身宽度, 子槽位总宽+间距)
+  // 槽位布局（两遍）：
+  // 第一遍自底向上计算每个节点的槽位宽度 = max(自身宽度, 子槽位总宽+间距)；
+  // 第二遍自顶向下分配槽位起点，把父节点偏移正确传递给子节点，避免深层树向左塌陷
   const slot = new Map<string, { left: number; width: number }>();
+  const widthOf = new Map<string, number>();
   const computeWidth = (id: string): number => {
+    const cached = widthOf.get(id);
+    if (cached !== undefined) return cached;
     const kids = childrenOf.get(id) ?? [];
     const w = sizes.get(id)!.w;
     if (kids.length === 0) {
-      slot.set(id, { left: 0, width: w });
+      widthOf.set(id, w);
       return w;
     }
     const kidWidths = kids.map((k) => computeWidth(k));
     const total = kidWidths.reduce((a, b) => a + b, 0) + cfg.hGap * (kids.length - 1);
     const width = Math.max(w, total);
-    let left = (width - total) / 2;
-    for (let i = 0; i < kids.length; i++) {
-      const s = slot.get(kids[i])!;
-      s.left += left;
-      left += kidWidths[i] + cfg.hGap;
-    }
-    slot.set(id, { left: 0, width });
+    widthOf.set(id, width);
     return width;
   };
   const rootSlotWidth = computeWidth(root.id);
+  const assignLeft = (id: string, left: number) => {
+    const kids = childrenOf.get(id) ?? [];
+    const w = widthOf.get(id)!;
+    slot.set(id, { left, width: w });
+    if (kids.length === 0) return;
+    const total = kids.reduce((a, k) => a + widthOf.get(k)!, 0) + cfg.hGap * (kids.length - 1);
+    let cur = left + (w - total) / 2;
+    for (const k of kids) {
+      assignLeft(k, cur);
+      cur += widthOf.get(k)! + cfg.hGap;
+    }
+  };
+  assignLeft(root.id, 0);
 
   // 层级与行高
   const levelH = levelIds.map((ids) => Math.max(0, ...ids.map((id) => sizes.get(id)!.h)));
@@ -120,6 +147,7 @@ export function layoutTree(tree: EquityTree, cfg: LayoutConfig = DEFAULT_LAYOUT_
     });
   }
 
+
   // 境内/境外分区：境外股东一律位于虚线上方；当境外与境内节点同层或交错、
   // 无法自然画出分隔线时，把境外节点统一提升到顶部，境内节点在虚线下方按层排列
   const splitApplied = applyZoneSplit(layoutNodes, cfg);
@@ -127,9 +155,7 @@ export function layoutTree(tree: EquityTree, cfg: LayoutConfig = DEFAULT_LAYOUT_
 
   // 正交连线：投资方（上）→ 被投资企业（下），多股东汇聚为水平总线
   const segments: LayoutSegment[] = [];
-  const domesticRects = layoutNodes
-    .filter((n) => n.stopReason !== 'overseas')
-    .map((n) => ({ x: n.x, y: n.y, w: n.w, h: n.h }));
+  const nodeRects = layoutNodes.map((n) => ({ x: n.x, y: n.y, w: n.w, h: n.h }));
   let laneCounter = 0;
   const nextLane = () => 12 + laneCounter++ * 10;
   const byTo = new Map<string, Array<{ fromId: string; ratio: number | null }>>();
@@ -152,10 +178,9 @@ export function layoutTree(tree: EquityTree, cfg: LayoutConfig = DEFAULT_LAYOUT_
       const sx = f.x + f.w / 2;
       const sy = f.y + f.h;
       if (
-        f.stopReason === 'overseas' &&
-        crossesAny(sx, sy, sx, to.y, domesticRects)
+        crossesAny(sx, sy, sx, to.y, nodeRects)
       ) {
-        // 境外股东直连会穿过境内文本框时，从页面左侧绕行
+        // 直连会穿过其他文本框时（共享主体长距离边、境外股东等），从页面左侧绕行
         const laneX = nextLane();
         segments.push({ x1: sx, y1: sy, x2: sx, y2: sy + 4, arrow: false, edgeId: f.id, kind: 'drop' });
         segments.push({ x1: sx, y1: sy + 4, x2: laneX, y2: sy + 4, arrow: false, edgeId: f.id, kind: 'drop' });
@@ -186,14 +211,15 @@ export function layoutTree(tree: EquityTree, cfg: LayoutConfig = DEFAULT_LAYOUT_
 
     const gapTop = Math.max(...froms.map((f) => f.y + f.h));
     const gapBottom = to.y;
-    const busY = gapTop + (gapBottom - gapTop) * 0.5;
+    // 总线贴近被投资企业上方，避免共享主体长距离边导致总线穿过中间行
+    const busY = Math.min(gapTop + (gapBottom - gapTop) * 0.5, to.y - 24);
     let minX = Infinity;
     let maxX = -Infinity;
     froms.forEach((f) => {
       const sx = f.x + f.w / 2;
       const sy = f.y + f.h;
-      if (f.stopReason === 'overseas' && crossesAny(sx, sy, sx, busY, domesticRects)) {
-        // 境外股东向下会穿过境内文本框时，从页面左侧绕行接入总线
+      if (crossesAny(sx, sy, sx, busY, nodeRects)) {
+        // 向下会穿过其他文本框时（共享主体长距离边、境外股东等），从页面左侧绕行接入总线
         const laneX = nextLane();
         minX = Math.min(minX, laneX);
         segments.push({ x1: sx, y1: sy, x2: sx, y2: sy + 4, arrow: false, edgeId: f.id, kind: 'drop' });
@@ -274,16 +300,25 @@ export function layoutTree(tree: EquityTree, cfg: LayoutConfig = DEFAULT_LAYOUT_
 
   // 安全网：正常情况下构造保证无重叠；若有问题则放大间距重排一次
   const report = checkLayout(layout);
-  if (report.nodeOverlaps > 0 || report.segmentNodeHits > 0 || report.segmentCrossings > 0) {
+  // 连线交叉在复杂多路径（共享主体）图中难以完全避免，不作为致命项；
+  // 文本框重叠与连线穿框必须修复
+  if (report.nodeOverlaps > 0 || report.segmentNodeHits > 0) {
     // 分区布局产生碰撞时退回原始布局；仍碰撞则放大间距重排
     if (splitApplied) {
-      return layoutTree(tree, { ...cfg, zoneSplit: false });
+      return layoutTree(tree, { ...cfg, zoneSplit: false }, depth + 1);
     }
-    return layoutTree(tree, {
-      ...cfg,
-      hGap: cfg.hGap + 30,
-      rowGap: cfg.rowGap + 40,
-    });
+    if (depth < 3) {
+      return layoutTree(
+        tree,
+        {
+          ...cfg,
+          hGap: cfg.hGap + 30,
+          rowGap: cfg.rowGap + 40,
+        },
+        depth + 1,
+      );
+    }
+    return layout; // 尽力而为，避免无限重排
   }
   return layout;
 }
@@ -296,6 +331,13 @@ function crossesAny(
   rects: Array<{ x: number; y: number; w: number; h: number }>,
 ): boolean {
   return rects.some((r) => segIntersectsRectStrict(x1, y1, x2, y2, r));
+}
+
+function rectsOverlap(
+  a: { x: number; y: number; w: number; h: number },
+  b: { x: number; y: number; w: number; h: number },
+): boolean {
+  return a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
 }
 
 /**
@@ -415,18 +457,57 @@ export function attachRatioLabels(
       if (boundary && seg.y1 < boundary.y && seg.y2 > boundary.y) {
         anchorY = Math.min(boundary.y + 12, seg.y2 - 10);
       }
-      const side: RatioLabelSide = sideMode === 'right' ? 'right' : i % 2 === 0 ? 'left' : 'right';
       const size = ratioLabelSize(text);
-      const x = side === 'left' ? seg.x1 - LABEL_GAP - size.w : seg.x1 + LABEL_GAP;
-      const y = anchorY - size.h / 2;
+      const preferred: RatioLabelSide = sideMode === 'right' ? 'right' : i % 2 === 0 ? 'left' : 'right';
+      // 候选位置：优先同侧，必要时加大间距/上下偏移/换到另一侧，避免与连线或文本框重合
+      const placements: Array<{ side: RatioLabelSide; dy: number; gap: number }> =
+        sideMode === 'right'
+          ? [
+              { side: 'right', dy: 0, gap: LABEL_GAP },
+              { side: 'right', dy: 0, gap: LABEL_GAP + 10 },
+              { side: 'right', dy: -10, gap: LABEL_GAP },
+              { side: 'right', dy: 10, gap: LABEL_GAP },
+              { side: 'right', dy: -20, gap: LABEL_GAP },
+              { side: 'right', dy: 20, gap: LABEL_GAP },
+            ]
+          : [
+              { side: preferred, dy: 0, gap: LABEL_GAP },
+              { side: preferred, dy: 0, gap: LABEL_GAP + 10 },
+              { side: preferred, dy: -10, gap: LABEL_GAP },
+              { side: preferred, dy: 10, gap: LABEL_GAP },
+              { side: preferred === 'left' ? 'right' : 'left', dy: 0, gap: LABEL_GAP },
+              { side: preferred === 'left' ? 'right' : 'left', dy: 0, gap: LABEL_GAP + 10 },
+              { side: preferred, dy: -20, gap: LABEL_GAP },
+              { side: preferred, dy: 20, gap: LABEL_GAP },
+            ];
+      let chosen: { x: number; y: number; side: RatioLabelSide } | null = null;
+      for (const c of placements) {
+        const cx = c.side === 'left' ? seg.x1 - c.gap - size.w : seg.x1 + c.gap;
+        const cy = anchorY + c.dy - size.h / 2;
+        const rect = { x: cx, y: cy, w: size.w, h: size.h };
+        const hitNode = layout.nodes.some((n) => rectsOverlap(rect, { x: n.x, y: n.y, w: n.w, h: n.h }));
+        const hitSeg = layout.segments.some((s) => segIntersectsRectStrict(s.x1, s.y1, s.x2, s.y2, rect));
+        const hitLabel = labels.some((l) => rectsOverlap(rect, { x: l.x, y: l.y, w: l.w, h: l.h }));
+        if (!hitNode && !hitSeg && !hitLabel) {
+          chosen = { x: cx, y: cy, side: c.side };
+          break;
+        }
+      }
+      if (!chosen) {
+        chosen = {
+          x: preferred === 'left' ? seg.x1 - LABEL_GAP - size.w : seg.x1 + LABEL_GAP,
+          y: anchorY - size.h / 2,
+          side: preferred,
+        };
+      }
       labels.push({
         edgeId: e.fromId,
         text,
-        x,
-        y,
+        x: chosen.x,
+        y: chosen.y,
         w: size.w,
         h: size.h,
-        side,
+        side: chosen.side,
         anchorX: seg.x1,
         anchorY,
       });

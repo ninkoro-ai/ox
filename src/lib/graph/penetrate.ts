@@ -9,21 +9,9 @@ import type {
 import { formatRatio } from '../excel/ratio';
 import { inferRegPlace, isLikelyNaturalPerson, isLikelyOverseas } from './classify';
 
-const STOP_TAGS: Record<string, string> = {
-  'natural-person': '自然人',
-  overseas: '境外',
-  'below-threshold': '未穿透',
-  'unknown-ratio': '股比不详',
-  'no-shareholders': '无股东信息',
-  'max-level': '已达层级上限',
-  merged: '合并股东',
-};
-
-export function stopTag(reason: StopReason, threshold: number): string | undefined {
-  if (reason === 'expanded') return undefined;
-  // 未穿透状态不显示在文本框内，持股比例已在连接线旁展示
-  if (reason === 'below-threshold') return undefined;
-  return STOP_TAGS[reason];
+export function stopTag(): string | undefined {
+  // 文本框内仅显示持股主体名称，不再显示自然人/境外等标签
+  return undefined;
 }
 
 export function buildEquityTree(
@@ -47,6 +35,8 @@ export function buildEquityTree(
   const nodes: TreeNode[] = [];
   const edges: TreeEdge[] = [];
   const nodeOf = new Map<string, TreeNode>();
+  const nodeByName = new Map<string, string>(); // 主体名称 -> 节点 id（重复股东去重）
+  const edgeKey = new Set<string>(); // "from\0to" 已建立的边
   let counter = 0;
 
   const rootId = `n${counter++}`;
@@ -67,9 +57,10 @@ export function buildEquityTree(
   };
   nodes.push(root);
   nodeOf.set(rootId, root);
+  nodeByName.set(targetName, rootId);
 
-  const queue: Array<{ id: string; name: string; level: number; ancestors: Set<string> }> = [
-    { id: rootId, name: targetName, level: 0, ancestors: new Set([targetName]) },
+  const queue: Array<{ id: string; name: string; ancestors: Set<string> }> = [
+    { id: rootId, name: targetName, ancestors: new Set([targetName]) },
   ];
 
   let skippedByCycle = 0;
@@ -78,7 +69,7 @@ export function buildEquityTree(
   while (queue.length) {
     const cur = queue.shift()!;
     const curNode = nodeOf.get(cur.id)!;
-    const canExpand = curNode.stopReason === 'expanded' && cur.level < opts.maxLevel;
+    const canExpand = curNode.stopReason === 'expanded' && curNode.level < opts.maxLevel;
     const children = canExpand ? (incoming.get(cur.name) ?? []) : [];
     const seenChild = new Set<string>();
 
@@ -93,7 +84,9 @@ export function buildEquityTree(
       seenChild.add(investor);
 
       const ratio = rel.ratio;
-      const below = ratio === null ? true : ratio < opts.threshold;
+      // 穿透规则：任一层的单一持股超过阈值（默认 25%）就继续向上穿透，
+      // 直至单一持股不超过阈值为止（等于阈值视为“不超过”，停止穿透）
+      const below = ratio === null ? true : ratio <= opts.threshold;
       const display = curNode.isTarget ? true : !below || opts.showBelowThreshold;
       if (!display) continue;
 
@@ -104,7 +97,7 @@ export function buildEquityTree(
       if (isPerson) reason = 'natural-person';
       else if (isOverseas) reason = 'overseas';
       else if (ratio === null) reason = 'unknown-ratio';
-      else if (ratio < opts.threshold) reason = 'below-threshold';
+      else if (below) reason = 'below-threshold';
       else reason = 'expanded';
 
       const hasShareholders = (incoming.get(investor) ?? []).some(
@@ -112,36 +105,50 @@ export function buildEquityTree(
       );
       if (reason === 'expanded' && !hasShareholders) reason = 'no-shareholders';
 
+      // 重复股东去重：同一主体只保留一个节点，补充完整持股路径（边）
+      const existingId = nodeByName.get(investor);
+      if (existingId) {
+        const ex = nodeOf.get(existingId)!;
+        const ek = `${existingId}\u0000${cur.id}`;
+        if (edgeKey.has(ek)) continue;
+        edgeKey.add(ek);
+        if (!curNode.children.includes(existingId)) curNode.children.push(existingId);
+        edges.push({ fromId: existingId, toId: cur.id, ratio, label: formatRatio(ratio, precision) });
+        // 若该主体在新路径上应继续穿透而此前未展开，则补充展开
+        if (ex.stopReason !== 'expanded' && reason === 'expanded' && ex.level < opts.maxLevel) {
+          ex.stopReason = 'expanded';
+          queue.push({ id: existingId, name: investor, ancestors: new Set([...cur.ancestors, investor]) });
+        }
+        if (ratio === null) unknownCount++;
+        continue;
+      }
+
       const childId = `n${counter++}`;
       const child: TreeNode = {
         id: childId,
         name: investor,
         parentId: cur.id,
-        level: cur.level + 1,
+        level: curNode.level + 1,
         ratio,
         ratioText: formatRatio(ratio, precision),
         stopReason: reason,
-        tag: stopTag(reason, opts.threshold),
         children: [],
         isTarget: false,
-      isMerged: false,
-      mergedCount: 1,
-      mergedSum: null,
-      regPlace: isPerson ? undefined : inferRegPlace(investor, isOverseas),
-    };
+        isMerged: false,
+        mergedCount: 1,
+        mergedSum: null,
+        regPlace: isPerson ? undefined : inferRegPlace(investor, isOverseas),
+      };
       nodes.push(child);
       nodeOf.set(childId, child);
+      nodeByName.set(investor, childId);
       curNode.children.push(childId);
       edges.push({ fromId: childId, toId: cur.id, ratio, label: formatRatio(ratio, precision) });
+      edgeKey.add(`${childId}\u0000${cur.id}`);
 
       if (ratio === null) unknownCount++;
       if (reason === 'expanded') {
-        queue.push({
-          id: childId,
-          name: investor,
-          level: cur.level + 1,
-          ancestors: new Set([...cur.ancestors, investor]),
-        });
+        queue.push({ id: childId, name: investor, ancestors: new Set([...cur.ancestors, investor]) });
       }
     }
   }

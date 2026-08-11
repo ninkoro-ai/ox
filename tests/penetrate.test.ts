@@ -43,6 +43,43 @@ describe('银行授信股权穿透规则', () => {
     expect(t.nodes.filter((n) => n.level === 2).length).toBe(3);
   });
 
+  it('文本框内不显示任何停止标签，仅保留主体名称', () => {
+    const t = tree([
+      { investor: '旭阳集团有限公司', investee: '目标公司', ratio: 80 },
+      { investor: '自然人张三', investee: '目标公司', ratio: 30 },
+      { investor: '香港控股有限公司', investee: '目标公司', ratio: 10 },
+    ]);
+    for (const n of t.nodes) {
+      expect(n.tag).toBeUndefined();
+    }
+  });
+
+  it('单一持股等于阈值（25%）时停止穿透，超过才继续', () => {
+    const t = tree([
+      { investor: 'A公司', investee: '目标公司', ratio: 80 },
+      { investor: 'B公司', investee: 'A公司', ratio: 25 },
+      { investor: 'C公司', investee: 'A公司', ratio: 26 },
+      { investor: 'D公司', investee: 'C公司', ratio: 100 },
+    ]);
+    expect(t.nodes.find((n) => n.name === 'B公司')?.stopReason).toBe('below-threshold');
+    expect(t.nodes.find((n) => n.name === 'C公司')?.stopReason).toBe('expanded');
+  });
+
+  it('重复股东只列示一次，并补充完整持股路径', () => {
+    const t = tree([
+      { investor: 'A公司', investee: '目标公司', ratio: 60 },
+      { investor: 'C公司', investee: 'A公司', ratio: 40 },
+      { investor: 'B公司', investee: '目标公司', ratio: 30 },
+      { investor: 'C公司', investee: 'B公司', ratio: 100 },
+    ]);
+    expect(t.nodes.filter((n) => n.name === 'C公司').length).toBe(1);
+    const c = t.nodes.find((n) => n.name === 'C公司')!;
+    const cEdges = t.edges.filter((e) => e.fromId === c.id);
+    expect(cEdges.length).toBe(2);
+    expect(new Set(cEdges.map((e) => e.toId)).size).toBe(2);
+    expect(c.level).toBe(2);
+  });
+
   it('第一层直接股东持股大于 25% 必须向上穿透', () => {
     const t = tree([
       { investor: '旭阳集团有限公司', investee: '目标公司', ratio: 80.48 },
