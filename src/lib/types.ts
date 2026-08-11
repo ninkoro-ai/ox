@@ -155,6 +155,8 @@ export interface LayoutSegment {
   y2: number;
   arrow: boolean;
   edgeId: string;
+  /** 该线段所属的股权关系终点（被投资方节点 id），用于把路径归属到 Edge */
+  toId: string;
   kind: 'drop' | 'bus' | 'entry';
   /** 连线颜色（RRGGBB，不含 #）。默认黑色；与其他连线交叉/重叠时为防混淆改用调色板颜色 */
   color?: string;
@@ -198,6 +200,11 @@ export interface EquityEdge {
   ratio: number | null;
   label: string;
   labelPosition?: RatioLabelPosition;
+  /**
+   * 连接路径：由布局阶段计算并归属于本 Edge 的全部线段（正交折线/总线/箭头）。
+   * 渲染器只遍历 Edge 及其 path 绘制连线；未来接入 PowerPoint Connector 时仅替换渲染层。
+   */
+  path?: LayoutSegment[];
 }
 
 /** 境内 / 境外分隔虚线 */

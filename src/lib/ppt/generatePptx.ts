@@ -111,23 +111,26 @@ export async function generatePptx(
   const toX = (v: number) => offX + toIn(v);
   const toY = (v: number) => offY + toIn(v);
 
-  // 连线：正交折线 + 汇聚总线 + 箭头。
+  // 连线：所有连接关系均来自 Edge 对象（EquityEdge.path 由布局阶段计算并归属到边），
+  // 渲染器不直接根据坐标清单画线；未来接入 PowerPoint Connector 时仅替换本渲染层。
   // OOXML 中 a:ext 的 cx/cy 必须 >= 0（ST_PositiveCoordinate），
   // 反向线段（x2<x1 或 y2<y1）必须归一化为最小角坐标 + 绝对值尺寸，
   // 否则 PowerPoint 会判定内容损坏并弹出修复提示。
-  for (const s of opts.layout.segments) {
-    const lineOpts: Record<string, unknown> = {
-      x: toX(Math.min(s.x1, s.x2)),
-      y: toY(Math.min(s.y1, s.y2)),
-      w: toIn(Math.abs(s.x2 - s.x1)),
-      h: toIn(Math.abs(s.y2 - s.y1)),
-      line: {
-        color: s.color ?? EDGE_COLOR,
-        width: s.control ? 2.0 : 1.3,
-        endArrowType: s.arrow ? 'triangle' : 'none',
-      },
-    };
-    slide.addShape(pptx.ShapeType.line as never, lineOpts);
+  for (const e of opts.layout.edges) {
+    for (const s of e.path ?? []) {
+      const lineOpts: Record<string, unknown> = {
+        x: toX(Math.min(s.x1, s.x2)),
+        y: toY(Math.min(s.y1, s.y2)),
+        w: toIn(Math.abs(s.x2 - s.x1)),
+        h: toIn(Math.abs(s.y2 - s.y1)),
+        line: {
+          color: s.color ?? EDGE_COLOR,
+          width: s.control ? 2.0 : 1.3,
+          endArrowType: s.arrow ? 'triangle' : 'none',
+        },
+      };
+      slide.addShape(pptx.ShapeType.line as never, lineOpts);
+    }
   }
 
   // 公司节点：单个带边框的文本框（名称/注册地内嵌），拖动文本框时文字跟随

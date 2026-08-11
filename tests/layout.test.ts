@@ -142,6 +142,49 @@ describe('布局引擎', () => {
     expect(targetEntries.length).toBe(1);
   });
 
+  it('连接关系独立保存：Edge.path 完整覆盖所有连线，渲染器只依赖 Edge', () => {
+    const relations: EquityRelation[] = [];
+    for (let i = 1; i <= 8; i++) {
+      relations.push({ investor: `股东${i}有限公司`, investee: '目标公司', ratio: 25 + i });
+    }
+    relations.push({ investor: '上层控股有限公司', investee: '股东1有限公司', ratio: 100 });
+    const tree = makeTree(relations);
+    const fit = fitLayout(tree, {
+      pageMode: 'auto',
+      mergeRatio: 25,
+      mergeStartLevel: 1,
+      autoMerge: true,
+      showRegPlace: false,
+      mergeBelow: false,
+      ratioPrecision: 2,
+    });
+    // 每条 Edge 都有连接路径
+    expect(fit.layout.edges.length).toBeGreaterThan(0);
+    for (const e of fit.layout.edges) {
+      expect((e.path ?? []).length).toBeGreaterThan(0);
+    }
+    // 所有线段都归属到某条 Edge 且无遗漏、无重复
+    const covered = new Set(fit.layout.segments);
+    for (const e of fit.layout.edges) {
+      for (const s of e.path ?? []) {
+        expect(covered.has(s)).toBe(true);
+        covered.delete(s);
+      }
+    }
+    expect(covered.size).toBe(0);
+    // 多股东汇聚到任一被投资企业只保留一个箭头（挂在主边 path 上）
+    const arrowSegs = fit.layout.edges.flatMap((e) => e.path ?? []).filter((s) => s.arrow);
+    expect(arrowSegs.length).toBe(2); // 目标公司总线箭头 + 上层控股→股东1 箭头
+    // 目标公司的总线与入口只属于主边（持股比例最大的股东边）
+    const primary = fit.layout.nodes.find((n) => n.name === '股东8有限公司')!;
+    const busOwner = fit.layout.edges.filter((e) => (e.path ?? []).some((s) => s.kind === 'bus'));
+    expect(busOwner.length).toBe(1);
+    expect(busOwner[0].fromId).toBe(primary.id);
+    const targetId = fit.layout.nodes.find((n) => n.isTarget)!.id;
+    const primaryEdge = fit.layout.edges.find((e) => e.fromId === primary.id && e.toId === targetId)!;
+    expect(primaryEdge.path?.some((s) => s.kind === 'entry' && s.arrow)).toBe(true);
+  });
+
   it('股东过多时自动合并并适配 A3', () => {
     const relations: EquityRelation[] = [];
     for (let i = 1; i <= 60; i++) {
@@ -281,11 +324,11 @@ describe('布局引擎', () => {
 
   it('连线交叉/重叠时自动使用不同颜色防止混淆', () => {
     const segments: LayoutSegment[] = [
-      { x1: 0, y1: 10, x2: 100, y2: 10, arrow: false, edgeId: 'a', kind: 'drop' as const },
-      { x1: 50, y1: 0, x2: 50, y2: 80, arrow: false, edgeId: 'b', kind: 'drop' as const },
-      { x1: 0, y1: 40, x2: 120, y2: 40, arrow: false, edgeId: 'c', kind: 'bus' as const },
-      { x1: 90, y1: 40, x2: 90, y2: 120, arrow: false, edgeId: 'd', kind: 'entry' as const },
-      { x1: 0, y1: 60, x2: 100, y2: 60, arrow: false, edgeId: 'e', kind: 'bus' as const },
+      { x1: 0, y1: 10, x2: 100, y2: 10, arrow: false, edgeId: 'a', toId: 'x', kind: 'drop' as const },
+      { x1: 50, y1: 0, x2: 50, y2: 80, arrow: false, edgeId: 'b', toId: 'x', kind: 'drop' as const },
+      { x1: 0, y1: 40, x2: 120, y2: 40, arrow: false, edgeId: 'c', toId: 'x', kind: 'bus' as const },
+      { x1: 90, y1: 40, x2: 90, y2: 120, arrow: false, edgeId: 'd', toId: 'x', kind: 'entry' as const },
+      { x1: 0, y1: 60, x2: 100, y2: 60, arrow: false, edgeId: 'e', toId: 'x', kind: 'bus' as const },
     ];
     applySegmentColors(segments);
     const colored = segments.filter((s) => s.color && s.color !== '000000');

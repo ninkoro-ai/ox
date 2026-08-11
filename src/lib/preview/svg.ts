@@ -22,13 +22,16 @@ export function renderChartSvg(layout: LayoutResult, threshold: number): string 
     `<defs><marker id="arr" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="${EDGE_COLOR}"/></marker></defs>`,
   );
 
-  for (const s of layout.segments) {
-    const isH = s.y1 === s.y2;
-    const marker = s.arrow ? ' marker-end="url(#arr)"' : '';
-    const color = s.color ?? EDGE_COLOR;
-    parts.push(
-      `<line x1="${s.x1}" y1="${s.y1}" x2="${s.x2}" y2="${s.y2}" stroke="#${color}" stroke-width="1.6"${marker}${isH ? '' : ''}/>`,
-    );
+  // 预览与 PPT 渲染器一致：连线全部来自 Edge 对象及其 path，不直接读坐标清单
+  for (const e of layout.edges) {
+    for (const s of e.path ?? []) {
+      const isH = s.y1 === s.y2;
+      const marker = s.arrow ? ' marker-end="url(#arr)"' : '';
+      const color = s.color ?? EDGE_COLOR;
+      parts.push(
+        `<line x1="${s.x1}" y1="${s.y1}" x2="${s.x2}" y2="${s.y2}" stroke="#${color}" stroke-width="1.6"${marker}${isH ? '' : ''}/>`,
+      );
+    }
   }
 
   for (const n of layout.nodes) {

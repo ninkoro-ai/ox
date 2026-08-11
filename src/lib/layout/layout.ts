@@ -213,11 +213,11 @@ export function layoutTree(
     const exitDir = fromAbove ? 4 : -4;
     const enterX = to.x + to.w / 2;
     const laneEndY = to.y - 14;
-    segments.push({ x1: exitX, y1: exitY, x2: exitX, y2: exitY + exitDir, arrow: false, edgeId: f.id, kind: 'drop', control: f.control });
-    segments.push({ x1: exitX, y1: exitY + exitDir, x2: laneX, y2: exitY + exitDir, arrow: false, edgeId: f.id, kind: 'drop', control: f.control });
-    segments.push({ x1: laneX, y1: exitY + exitDir, x2: laneX, y2: laneEndY, arrow: false, edgeId: f.id, kind: 'drop', control: f.control });
-    segments.push({ x1: laneX, y1: laneEndY, x2: enterX, y2: laneEndY, arrow: false, edgeId: f.id, kind: 'drop', control: f.control });
-    segments.push({ x1: enterX, y1: laneEndY, x2: enterX, y2: to.y, arrow: true, edgeId: f.id, kind: 'entry', control: f.control });
+    segments.push({ x1: exitX, y1: exitY, x2: exitX, y2: exitY + exitDir, arrow: false, edgeId: f.id, toId: to.id, kind: 'drop', control: f.control });
+    segments.push({ x1: exitX, y1: exitY + exitDir, x2: laneX, y2: exitY + exitDir, arrow: false, edgeId: f.id, toId: to.id, kind: 'drop', control: f.control });
+    segments.push({ x1: laneX, y1: exitY + exitDir, x2: laneX, y2: laneEndY, arrow: false, edgeId: f.id, toId: to.id, kind: 'drop', control: f.control });
+    segments.push({ x1: laneX, y1: laneEndY, x2: enterX, y2: laneEndY, arrow: false, edgeId: f.id, toId: to.id, kind: 'drop', control: f.control });
+    segments.push({ x1: enterX, y1: laneEndY, x2: enterX, y2: to.y, arrow: true, edgeId: f.id, toId: to.id, kind: 'entry', control: f.control });
   };
 
   for (const [toId, incoming] of byTo) {
@@ -250,10 +250,10 @@ export function layoutTree(
       ) {
         // 直连会穿过其他文本框时（共享主体长距离边、境外股东等），从页面左侧绕行
         const laneX = nextLane();
-        segments.push({ x1: sx, y1: sy, x2: sx, y2: sy + 4, arrow: false, edgeId: f.id, kind: 'drop', control: f.control });
-        segments.push({ x1: sx, y1: sy + 4, x2: laneX, y2: sy + 4, arrow: false, edgeId: f.id, kind: 'drop', control: f.control });
-        segments.push({ x1: laneX, y1: sy + 4, x2: laneX, y2: to.y - 14, arrow: false, edgeId: f.id, kind: 'drop', control: f.control });
-        segments.push({ x1: laneX, y1: to.y - 14, x2: to.x + to.w / 2, y2: to.y - 14, arrow: false, edgeId: f.id, kind: 'drop', control: f.control });
+        segments.push({ x1: sx, y1: sy, x2: sx, y2: sy + 4, arrow: false, edgeId: f.id, toId: to.id, kind: 'drop', control: f.control });
+        segments.push({ x1: sx, y1: sy + 4, x2: laneX, y2: sy + 4, arrow: false, edgeId: f.id, toId: to.id, kind: 'drop', control: f.control });
+        segments.push({ x1: laneX, y1: sy + 4, x2: laneX, y2: to.y - 14, arrow: false, edgeId: f.id, toId: to.id, kind: 'drop', control: f.control });
+        segments.push({ x1: laneX, y1: to.y - 14, x2: to.x + to.w / 2, y2: to.y - 14, arrow: false, edgeId: f.id, toId: to.id, kind: 'drop', control: f.control });
         segments.push({
           x1: to.x + to.w / 2,
           y1: to.y - 14,
@@ -261,6 +261,7 @@ export function layoutTree(
           y2: to.y,
           arrow: true,
           edgeId: f.id,
+          toId: to.id,
           kind: 'entry',
           control: f.control,
         });
@@ -273,6 +274,7 @@ export function layoutTree(
         y2: to.y,
         arrow: true,
         edgeId: f.id,
+        toId: to.id,
         kind: 'entry',
         control: f.control,
       });
@@ -308,6 +310,7 @@ export function layoutTree(
         y2: busY,
         arrow: false,
         edgeId: f.id,
+        toId: to.id,
         kind: 'drop',
         control: f.control,
       });
@@ -323,8 +326,8 @@ export function layoutTree(
       for (const f of laneFroms) {
         const sx = dropX(f);
         const sy = f.y + f.h;
-        segments.push({ x1: sx, y1: sy, x2: sx, y2: sy + 4, arrow: false, edgeId: f.id, kind: 'drop', control: f.control });
-        segments.push({ x1: sx, y1: sy + 4, x2: laneX, y2: sy + 4, arrow: false, edgeId: f.id, kind: 'drop', control: f.control });
+        segments.push({ x1: sx, y1: sy, x2: sx, y2: sy + 4, arrow: false, edgeId: f.id, toId: to.id, kind: 'drop', control: f.control });
+        segments.push({ x1: sx, y1: sy + 4, x2: laneX, y2: sy + 4, arrow: false, edgeId: f.id, toId: to.id, kind: 'drop', control: f.control });
       }
       segments.push({
         x1: laneX,
@@ -333,6 +336,7 @@ export function layoutTree(
         y2: busY,
         arrow: false,
         edgeId: toId,
+        toId: to.id,
         kind: 'drop',
         control: to.control ?? false,
       });
@@ -349,6 +353,7 @@ export function layoutTree(
       y2: to.y,
       arrow: true,
       edgeId: to.id,
+      toId: to.id,
       kind: 'entry',
       control: to.control ?? false,
     });
@@ -359,6 +364,7 @@ export function layoutTree(
       y2: busY,
       arrow: false,
       edgeId: toId,
+      toId: to.id,
       kind: 'bus',
       control: to.control ?? false,
     });
@@ -374,6 +380,23 @@ export function layoutTree(
     label: e.label,
     control: nodeOf.get(e.fromId)?.control ?? false,
   }));
+
+  // 连接路径归属到 Edge：渲染器只遍历 Edge 及其 path 绘制连线。
+  // 多股东汇聚时，总线与入口箭头只挂在“主边”（持股比例最大的股东边）上，
+  // 其余股东边只保留各自的引出线段（落点与总线相接）。
+  const primaryOf = new Map<string, string>();
+  for (const [toId, incoming] of byTo) {
+    const best = incoming.slice().sort((a, b) => (b.ratio ?? -1) - (a.ratio ?? -1))[0];
+    if (best) primaryOf.set(toId, best.fromId);
+  }
+  for (const e of edges) {
+    e.path = segments.filter(
+      (s) =>
+        s.toId === e.toId &&
+        (s.edgeId === e.fromId ||
+          (s.edgeId === e.toId && primaryOf.get(e.toId) === e.fromId)),
+    );
+  }
 
   const layout: LayoutResult = {
     nodes: layoutNodes,
