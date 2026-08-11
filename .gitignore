@@ -1,0 +1,10 @@
+node_modules
+node_modules.*
+dist
+out
+*.local
+*.old
+*.bak
+vite-dev.*
+.DS_Store
+*.log
