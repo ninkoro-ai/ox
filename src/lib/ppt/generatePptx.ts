@@ -81,12 +81,13 @@ export async function generatePptx(
     const baseW = textWidth(text, 10);
     if (baseW <= 0) return toPt(11);
     const maxPt = wIn * 72;
-    const f = Math.min(toPt(11), maxPt / (baseW * 0.075));
-    return Math.max(6.5, f);
+    // 容量自适应：目标字号 11pt，框内放得下就用目标字号，
+    // 放不下就收缩到刚好放下的尺寸，杜绝文字超出文本框
+    return Math.min(toPt(11), maxPt / (baseW * 0.075));
   };
   // 公司名称/注册地自适应字号：按文本框实际宽高动态缩放，保证文字不超出文本框
   const fitFont = (lines: string[], wIn: number, hIn: number, desiredPt: number, basePx: number): number => {
-    if (lines.length === 0 || wIn <= 0 || hIn <= 0) return Math.max(desiredPt, 6.5);
+    if (lines.length === 0 || wIn <= 0 || hIn <= 0) return desiredPt;
     const wLimit = Math.min(
       ...lines.map((l) => {
         const bw = textWidth(l, basePx);
@@ -94,7 +95,7 @@ export async function generatePptx(
       }),
     );
     const hLimit = (hIn * 72) / (lines.length * 1.35);
-    return Math.max(6.5, Math.min(desiredPt, wLimit, hLimit));
+    return Math.min(desiredPt, wLimit, hLimit);
   };
 
   // 水平居中（保留顶部起始位置，简单图表约占半张 A4 版面）

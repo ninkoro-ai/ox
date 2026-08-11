@@ -158,5 +158,5 @@ export interface LayoutResult {
   height: number;
 }
 
-export type PageKey = '16x9' | 'a4' | 'a3';
+export type PageKey = '16x9' | 'a4' | 'a3' | 'a2';
 export type PageMode = 'auto' | PageKey;

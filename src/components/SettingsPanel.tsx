@@ -5,7 +5,7 @@ export interface SettingsState {
   stopNatural: boolean;
   stopOverseas: boolean;
   maxLevel: number;
-  pageMode: 'auto' | '16x9' | 'a4' | 'a3';
+  pageMode: 'auto' | '16x9' | 'a4' | 'a3' | 'a2';
   autoMerge: boolean;
   showRegPlace: boolean;
   mergeBelow: boolean;
@@ -109,6 +109,7 @@ export default function SettingsPanel({ settings, onChange, disabled }: Props) {
             <option value="16x9">16:9</option>
             <option value="a4">A4 横向</option>
             <option value="a3">A3 横向</option>
+            <option value="a2">A2 横向</option>
           </select>
           <small>切换页面后图表会重新生成</small>
         </label>

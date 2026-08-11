@@ -10,6 +10,7 @@ import { checkLayout } from '../src/lib/layout/collision';
 import { generatePptx } from '../src/lib/ppt/generatePptx';
 import { renderChartSvg } from '../src/lib/preview/svg';
 import { EDGE_CROSS_COLORS } from '../src/lib/theme';
+import { textWidth } from '../src/lib/layout/measure';
 
 const ROOT = process.cwd();
 
@@ -203,7 +204,7 @@ describe.skipIf(!existsSync(BEILAI))('复杂股权图（贝特莱）验收', () 
       expect(slideXml).toContain(`val="${c}"`);
     }
     const outDir = join(ROOT, 'out');
-    writeFileSync(join(outDir, '深圳贝特莱电子科技股份有限公司-股权穿透结构图-规范版.pptx'), buf);
+    writeFileSync(join(outDir, '深圳贝特莱电子科技股份有限公司-股权穿透结构图-最终版.pptx'), buf);
     writeFileSync(
       join(outDir, 'preview-beilai.html'),
       `<!doctype html><html><head><meta charset="utf-8"></head><body style="margin:0;background:#fff">${renderChartSvg(
@@ -211,5 +212,74 @@ describe.skipIf(!existsSync(BEILAI))('复杂股权图（贝特莱）验收', () 
         25,
       )}</body></html>`,
     );
+  }, 180000);
+
+  it('合并阈值 3% 时文字不超出文本框、比例标签不重叠', async () => {
+    const wb = XLSX.readFile(BEILAI);
+    const parsed = parseWorkbook(wb);
+    const tree = buildEquityTree(
+      parsed.targetName!,
+      parsed.relations,
+      parsed.entityTypes ?? {},
+      { threshold: 25, stopAtNaturalPerson: true, stopAtOverseas: true, showBelowThreshold: true, maxLevel: 20, ratioPrecision: 2 },
+    );
+    const fit = fitLayout(tree, {
+      pageMode: 'auto',
+      mergeRatio: 3,
+      autoMerge: true,
+      showRegPlace: true,
+      mergeBelow: true,
+      ratioPrecision: 2,
+      textLayout: 'horizontal',
+    });
+    // 密集图自动升级到 A2 大版面，避免硬塞进 A3 导致文字溢出
+    expect(fit.page).toBe('a2');
+    const report = checkLayout(fit.layout);
+    expect(report.nodeOverlaps).toBe(0);
+    expect(report.labelNodeHits).toBe(0);
+    expect(report.labelOverlaps).toBe(0);
+    expect(report.labelSegmentHits).toBe(0);
+    // 节点文字按 PPTX 同款字号算法估算，必须不超出文本框
+    for (const n of fit.layout.nodes) {
+      const wIn = n.w * fit.pxToIn;
+      const hIn = n.h * fit.pxToIn;
+      const wLimit = Math.min(
+        ...n.lines.map((l) => {
+          const bw = textWidth(l, 13);
+          return bw > 0 ? (wIn * 72) / (bw * 13 * 0.0075) : 99;
+        }),
+      );
+      const hLimit = (hIn * 72) / (n.lines.length * 1.35);
+      const font = Math.min(13 * fit.pxToIn * 72, wLimit, hLimit);
+      const needW = Math.max(...n.lines.map((l) => ((textWidth(l, 13) * font) / 13) * 0.75));
+      const needH = n.lines.length * font * 1.35;
+      expect(needW).toBeLessThanOrEqual(wIn * 72 + 0.5);
+      expect(needH).toBeLessThanOrEqual(hIn * 72 + 0.5);
+    }
+    // 比例标签文字必须不超出标签框（容量自适应字号）
+    for (const l of fit.layout.labels) {
+      const baseW = textWidth(l.text, 10);
+      const maxPt = l.w * fit.pxToIn * 72;
+      const font = Math.min(Math.max(8, Math.min(40, 11 * fit.pxToIn * 72)), maxPt / (baseW * 0.075));
+      const needW = ((baseW * font) / 10) * 0.75;
+      expect(needW).toBeLessThanOrEqual(maxPt + 0.5);
+    }
+    const buf = (await generatePptx(
+      {
+        tree: fit.tree,
+        layout: fit.layout,
+        page: fit.page,
+        pxToIn: fit.pxToIn,
+        title: `${tree.targetName} 股权穿透结构图`,
+        subtitle: `数据来源：工商股权结构报告 · 穿透阈值 25% · 合并阈值 3%`,
+        threshold: 25,
+        mergeRatio: 3,
+        mergedGroups: fit.mergedGroups,
+      },
+      'nodebuffer',
+    )) as Buffer;
+    const zip = await JSZip.loadAsync(buf);
+    const slideXml = await zip.file('ppt/slides/slide1.xml')!.async('text');
+    expect(slideXml.match(/<a:ext cx="-\d+|cy="-\d+/)).toBeNull();
   }, 180000);
 });
