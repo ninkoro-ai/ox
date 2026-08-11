@@ -54,6 +54,8 @@ export interface TreeNode {
   isMerged: boolean;
   mergedCount: number;
   mergedSum: number | null;
+  /** 是否处于控制链上（第一层 ≥ 阈值股东及其上游链条；银行标准模式用于突出显示） */
+  control?: boolean;
 }
 
 export interface TreeEdge {
@@ -106,6 +108,9 @@ export interface LayoutNode {
   regPlace?: string;
   isTarget: boolean;
   isMerged: boolean;
+  control?: boolean;
+  /** 同一父节点下的行号（同层节点超过 5 个时自动换行排列，0 起） */
+  row?: number;
 }
 
 export interface LayoutSegment {
@@ -118,6 +123,8 @@ export interface LayoutSegment {
   kind: 'drop' | 'bus' | 'entry';
   /** 连线颜色（RRGGBB，不含 #）。默认黑色；与其他连线交叉/重叠时为防混淆改用调色板颜色 */
   color?: string;
+  /** 是否属于控制链连线（银行标准模式加粗突出） */
+  control?: boolean;
 }
 
 export type RatioLabelSide = 'left' | 'right';
@@ -179,6 +186,9 @@ export interface LayoutResult {
 export type PageKey = 'a4' | 'a3';
 export type PageMode = 'auto' | PageKey;
 
+/** 布局模式 */
+export type LayoutMode = 'bank-standard' | 'minor-shareholders';
+
 /**
  * 统一生成配置：贯穿解析、穿透、布局与 PPT 生成全流程
  */
@@ -189,13 +199,16 @@ export interface GenerateConfig {
   minorShareholderThreshold: number;
   /** 页面尺寸：auto（A4 → A3 自动适配）| a4 | a3 */
   pageSize: PageMode;
-  /** 最小字号（pt）：PPT 中文本框字号下限，默认 8 */
+  /** 最小字号（pt）：PPT 中文本框字号下限，默认 9，禁止通过无限缩小字体解决布局问题 */
   fontMinSize: number;
+  /** 布局模式：bank-standard 突出控制链；minor-shareholders 低比例股东合并显示 */
+  layoutMode: LayoutMode;
 }
 
 export const DEFAULT_GENERATE_CONFIG: GenerateConfig = {
   penetrationThreshold: 25,
   minorShareholderThreshold: 5,
   pageSize: 'auto',
-  fontMinSize: 8,
+  fontMinSize: 9,
+  layoutMode: 'bank-standard',
 };

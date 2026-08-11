@@ -84,9 +84,8 @@ export async function generatePptx(
     const baseW = textWidth(text, 10);
     if (baseW <= 0) return toPt(11);
     const maxPt = wIn * 72;
-    // 容量自适应：目标字号 11pt，框内放得下就用目标字号，
-    // 放不下就收缩到刚好放下的尺寸，杜绝文字超出文本框
-    return Math.min(toPt(11), maxPt / (baseW * 0.075));
+    // 目标字号 11pt；可读性优先：任何情况下不低于 fontMinSize（默认 9pt）
+    return Math.max(fontMin, Math.min(toPt(11), maxPt / (baseW * 0.075)));
   };
   // 公司名称/注册地自适应字号：按文本框实际宽高动态缩放，保证文字不超出文本框
   const fitFont = (lines: string[], wIn: number, hIn: number, desiredPt: number, basePx: number): number => {
@@ -98,7 +97,7 @@ export async function generatePptx(
       }),
     );
     const hLimit = (hIn * 72) / (lines.length * 1.35);
-    return Math.min(desiredPt, wLimit, hLimit);
+    return Math.max(fontMin, Math.min(desiredPt, wLimit, hLimit));
   };
 
   // 水平居中（保留顶部起始位置，简单图表约占半张 A4 版面）
@@ -124,7 +123,7 @@ export async function generatePptx(
       h: toIn(Math.abs(s.y2 - s.y1)),
       line: {
         color: s.color ?? EDGE_COLOR,
-        width: 1.3,
+        width: s.control ? 2.0 : 1.3,
         endArrowType: s.arrow ? 'triangle' : 'none',
       },
     };
@@ -147,7 +146,7 @@ export async function generatePptx(
         text: n.lines.join('\n'),
         options: {
           fontSize: namePt,
-          bold: n.isTarget,
+          bold: n.isTarget || Boolean(n.control),
           color: NODE_TEXT,
           fontFace: 'Microsoft YaHei',
           breakLine: Boolean(n.regPlace),
@@ -174,7 +173,7 @@ export async function generatePptx(
       rectRadius: 0.06,
       line: {
         color: NODE_BORDER,
-        width: n.isTarget ? 1.6 : 1.1,
+        width: n.isTarget || n.control ? 2.2 : 1.1,
         dashType: 'solid',
       },
       align: 'center',

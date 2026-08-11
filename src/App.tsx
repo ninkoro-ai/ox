@@ -33,6 +33,7 @@ export default function App() {
     minorShareholderThreshold: settings.mergeRatio,
     pageSize: settings.pageMode,
     fontMinSize: DEFAULT_GENERATE_CONFIG.fontMinSize,
+    layoutMode: settings.layoutMode,
   };
 
   const tree = useMemo(() => {
@@ -66,6 +67,7 @@ export default function App() {
         pageMode: generateConfig.pageSize,
         mergeRatio: generateConfig.minorShareholderThreshold,
         mergeStartLevel: settings.mergeStartLevel,
+        layoutMode: generateConfig.layoutMode,
         autoMerge: settings.autoMerge,
         showRegPlace: settings.showRegPlace,
         mergeBelow: settings.mergeBelow,
@@ -78,7 +80,7 @@ export default function App() {
       setError(`图表生成失败：${e instanceof Error ? e.message : String(e)}`);
       return null;
     }
-  }, [tree, generateConfig.pageSize, generateConfig.minorShareholderThreshold, settings.mergeStartLevel, settings.autoMerge, settings.showRegPlace, settings.mergeBelow, settings.ratioPrecision, settings.textLayout]);
+  }, [tree, generateConfig.pageSize, generateConfig.minorShareholderThreshold, generateConfig.layoutMode, settings.mergeStartLevel, settings.autoMerge, settings.showRegPlace, settings.mergeBelow, settings.ratioPrecision, settings.textLayout]);
 
   const layoutCheck = useMemo(() => (fit ? checkLayout(fit.layout) : null), [fit]);
   const svg = useMemo(

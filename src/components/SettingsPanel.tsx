@@ -12,6 +12,7 @@ export interface SettingsState {
   mergeBelow: boolean;
   ratioPrecision: number;
   textLayout: 'horizontal' | 'vertical' | 'combo';
+  layoutMode: 'bank-standard' | 'minor-shareholders';
 }
 
 interface Props {
@@ -34,6 +35,7 @@ export const DEFAULT_SETTINGS: SettingsState = {
   mergeBelow: false,
   ratioPrecision: 2,
   textLayout: 'horizontal',
+  layoutMode: 'bank-standard',
 };
 
 export default function SettingsPanel({ settings, onChange, disabled }: Props) {
@@ -138,6 +140,18 @@ export default function SettingsPanel({ settings, onChange, disabled }: Props) {
             <option value="combo">横向+纵向组合（股东较多时小于5%自动纵向）</option>
           </select>
           <small>默认横向；组合模式仅在同层股东较多时生效</small>
+        </label>
+        <label>
+          布局模式
+          <select
+            value={settings.layoutMode}
+            disabled={disabled}
+            onChange={(e) => set({ layoutMode: e.target.value as SettingsState['layoutMode'] })}
+          >
+            <option value="bank-standard">银行标准（突出控制链）</option>
+            <option value="minor-shareholders">低比例股东合并显示</option>
+          </select>
+          <small>银行标准加粗控制链；合并模式自动归并低于合并阈值的股东</small>
         </label>
       </div>
       <div className="settings-checks">

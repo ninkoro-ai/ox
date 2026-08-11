@@ -19,11 +19,12 @@ function makeTree(relations: EquityRelation[]) {
 }
 
 describe('布局引擎', () => {
-  it('统一生成配置默认值：穿透 25%、合并 5%、页面自动、最小字号 8', () => {
+  it('统一生成配置默认值：穿透 25%、合并 5%、页面自动、最小字号 9、银行标准模式', () => {
     expect(DEFAULT_GENERATE_CONFIG.penetrationThreshold).toBe(25);
     expect(DEFAULT_GENERATE_CONFIG.minorShareholderThreshold).toBe(5);
     expect(DEFAULT_GENERATE_CONFIG.pageSize).toBe('auto');
-    expect(DEFAULT_GENERATE_CONFIG.fontMinSize).toBe(8);
+    expect(DEFAULT_GENERATE_CONFIG.fontMinSize).toBe(9);
+    expect(DEFAULT_GENERATE_CONFIG.layoutMode).toBe('bank-standard');
   });
 
   it('小树无重叠，优先 A4 紧凑版面', () => {
@@ -64,13 +65,14 @@ describe('布局引擎', () => {
     expect(fit.layout.segments.every((s) => s.color === undefined)).toBe(true);
     // 有境外股东时绘制境内外分隔虚线
     expect(fit.layout.boundary).not.toBeNull();
-    // 同一层股东文本框等宽；除超长名称外尽量单行
+    // 节点尺寸按公司名称长度动态计算；除超长名称外尽量单行
     const level1 = fit.layout.nodes.filter((n) => n.level === 1);
     const widths = new Set(level1.map((n) => Math.round(n.w)));
-    expect(widths.size).toBe(1);
+    expect(widths.size).toBeGreaterThan(1);
+    // 同层不超过 5 个股东时不换行（全部在第 0 行）
+    expect(level1.every((n) => (n.row ?? 0) === 0)).toBe(true);
     const singleLine = level1.filter((n) => !n.name.includes('深创投'));
     for (const n of singleLine) expect(n.lines.length).toBe(1);
-    expect(fit.layout.nodes.filter((n) => n.level === 1 && n.lines.length === 1).length).toBeGreaterThanOrEqual(3);
     // 投资方在上，目标企业在下
     const target = fit.layout.nodes.find((n) => n.isTarget)!;
     expect(target.y + target.h).toBeGreaterThan(
@@ -78,7 +80,7 @@ describe('布局引擎', () => {
     );
   });
 
-  it('多股东汇聚总线（不产生交叉）', () => {
+  it('多股东汇聚总线：同层超过 5 个自动换行，交叉自动着色区分', () => {
     const relations: EquityRelation[] = [];
     for (let i = 1; i <= 8; i++) {
       relations.push({ investor: `股东${i}有限公司`, investee: '目标公司', ratio: 10 + i });
@@ -93,17 +95,56 @@ describe('布局引擎', () => {
       ratioPrecision: 2,
     });
     const report = checkLayout(fit.layout);
-    expect(report.segmentCrossings).toBe(0);
+    expect(report.nodeOverlaps).toBe(0);
+    expect(report.segmentNodeHits).toBe(0);
+    expect(report.labelSegmentHits).toBe(0);
     const buses = fit.layout.segments.filter((s) => s.kind === 'bus');
     expect(buses.length).toBeGreaterThan(0);
     // 多股东汇总到目标主体时只保留一个箭头
+    const targetEntries = fit.layout.segments.filter((s) => s.kind === 'entry' && s.arrow);
+    expect(targetEntries.length).toBe(1);
+    // 8 个股东自动换行为 2 行（5+3），第 2 行股东走车道接入
+    const level1 = fit.layout.nodes.filter((n) => n.level === 1);
+    expect(new Set(level1.map((n) => n.row)).size).toBeGreaterThan(1);
+    // 不可避免的交叉连线使用调色板颜色区分
+    const colored = fit.layout.segments.filter((s) => s.color);
+    if (report.segmentCrossings > 0) expect(colored.length).toBeGreaterThan(0);
+  });
+
+  it('30 个股东：自动换行、节点不重叠、字号 ≥9pt、单箭头汇总', () => {
+    const relations: EquityRelation[] = [];
+    for (let i = 1; i <= 30; i++) {
+      relations.push({ investor: `深圳市某股权投资基金（有限合伙）${i}号`, investee: '目标公司', ratio: i });
+    }
+    const tree = makeTree(relations);
+    const fit = fitLayout(tree, {
+      pageMode: 'auto',
+      mergeRatio: 5,
+      mergeStartLevel: 1,
+      autoMerge: false,
+      showRegPlace: false,
+      mergeBelow: false,
+      ratioPrecision: 2,
+      textLayout: 'horizontal',
+    });
+    const report = checkLayout(fit.layout);
+    expect(report.nodeOverlaps).toBe(0);
+    expect(report.segmentNodeHits).toBe(0);
+    expect(report.labelSegmentHits).toBe(0);
+    // 30 个股东自动换行为 6 行 x 5 个
+    const level1 = fit.layout.nodes.filter((n) => n.level === 1);
+    expect(level1.length).toBe(30);
+    expect(new Set(level1.map((n) => n.row)).size).toBe(6);
+    // 比例标签字号不低于 9pt（10px 设计字号换算）
+    expect(fit.pxToIn * 10 * 72).toBeGreaterThanOrEqual(9);
+    // 多股东汇总到目标主体只保留一个箭头
     const targetEntries = fit.layout.segments.filter((s) => s.kind === 'entry' && s.arrow);
     expect(targetEntries.length).toBe(1);
   });
 
   it('股东过多时自动合并并适配 A3', () => {
     const relations: EquityRelation[] = [];
-    for (let i = 1; i <= 40; i++) {
+    for (let i = 1; i <= 60; i++) {
       relations.push({ investor: `低比例股东${i}有限公司`, investee: '目标公司', ratio: 0.1 + i * 0.01 });
     }
     const tree = makeTree(relations);
@@ -289,7 +330,8 @@ describe('布局引擎', () => {
     });
     const pageV = PAGES[fitV.page];
     expect(fitV.layout.width * fitV.pxToIn).toBeLessThanOrEqual(pageV.wIn + 0.01);
-    expect(fitV.layout.height * fitV.pxToIn).toBeLessThanOrEqual(pageV.hIn + 0.01);
+    // 纵向排版以可读性优先：字号不得低于 9pt（不再通过无限缩小字体迁就页面）
+    expect(fitV.pxToIn * 13 * 72).toBeGreaterThanOrEqual(9);
     const longV = fitV.layout.nodes.find((n) => n.name.includes('大型股权投资'))!;
     expect(longV.lines.length).toBeGreaterThanOrEqual([...longV.name].length - 1);
   });

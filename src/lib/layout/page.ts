@@ -1,4 +1,4 @@
-import type { EquityTree, LayoutResult, PageKey, PageMode, TreeEdge, TreeNode } from '../types';
+import type { EquityTree, LayoutMode, LayoutResult, PageKey, PageMode, TreeEdge, TreeNode } from '../types';
 import { formatNum } from '../excel/ratio';
 import { attachRatioLabels, DEFAULT_LAYOUT_CONFIG, layoutTree } from './layout';
 
@@ -10,14 +10,10 @@ export const PAGES: Record<PageKey, { name: string; wIn: number; hIn: number }> 
 const MARGIN_X_IN = 0.55;
 const MARGIN_TOP_IN = 1.15;
 const MARGIN_BOTTOM_IN = 0.4;
-// pxToIn 单位：英寸/像素。名称字号 13px 对应 pt = 13 * pxToIn * 72。
-// 提高下限保证办公电脑/打印清晰可读：约 9pt 起（0.0095），页面放不下时自动升档到 A3
-const MIN_GOOD_A4 = 0.0095;
-const MIN_GOOD_A3 = 0.0085;
-const MIN_MANUAL = 0.008;
-const MIN_ALLOWED = 0.0065;
-// 简单结构不放大铺满整页：名称 13px 最多约 15.5pt，图表保持“约半张 A4”的紧凑尺寸
 const MAX_SCALE = 0.0165;
+// 可读性下限：比例标签按 10px 设计字号换算，fontMinSize(默认 9pt) 对应 pxToIn = 9 / (10*72)
+// 布局放不下时优先换行排列、自动升 A3，禁止通过无限缩小字体解决布局问题
+const MIN_FONT_SCALE = 9 / 720;
 
 function scaleFor(page: PageKey, layout: LayoutResult): number {
   const p = PAGES[page];
@@ -27,7 +23,7 @@ function scaleFor(page: PageKey, layout: LayoutResult): number {
 }
 
 function clampScale(s: number): number {
-  return Math.max(MIN_ALLOWED, Math.min(MAX_SCALE, s));
+  return Math.min(MAX_SCALE, s);
 }
 
 export interface FitOptions {
@@ -35,6 +31,10 @@ export interface FitOptions {
   mergeRatio: number;
   /** 合并起始层级：默认 2，即第一层（目标企业直接股东）不参与低比例合并，从第二层起生效 */
   mergeStartLevel?: number;
+  /** 布局模式：bank-standard 突出控制链；minor-shareholders 低比例股东合并显示 */
+  layoutMode?: LayoutMode;
+  /** 最小字号（pt）：默认 9，禁止无限缩小字体 */
+  fontMinSize?: number;
   autoMerge: boolean;
   showRegPlace: boolean;
   mergeBelow: boolean; // 生成前按用户阈值归并低比例股东
@@ -177,9 +177,11 @@ export function fitLayout(tree: EquityTree, opts: FitOptions): FitResult {
   let current = tree;
   let mergedGroups = 0;
   const warnings: string[] = [...tree.warnings];
+  const minFontScale = (opts.fontMinSize ?? 9) / 720;
 
-  // 用户选项：生成前直接按阈值归并低比例股东
-  if (opts.mergeBelow) {
+  // 用户选项：生成前直接按阈值归并低比例股东；
+  // 布局模式 minor-shareholders 同样强制低比例股东合并显示
+  if (opts.mergeBelow || opts.layoutMode === 'minor-shareholders') {
     const res = mergeLowRatio(current, opts.mergeRatio, opts.ratioPrecision, opts.mergeStartLevel ?? 2);
     if (res.merged) {
       current = res.tree;
@@ -197,16 +199,15 @@ export function fitLayout(tree: EquityTree, opts: FitOptions): FitResult {
       textLayout,
     });
     if (opts.pageMode === 'auto') {
-      // 简单结构优先 A4（约半张 A4 的紧凑版面），放不下再尝试 A3
-      for (const page of ['a4', 'a3'] as PageKey[]) {
-        const s = scaleFor(page, layout);
-        const min = page === 'a4' ? MIN_GOOD_A4 : MIN_GOOD_A3;
-        if (s >= min) return { page, layout, scale: s };
-      }
+      // 根据节点数量自动选择：A4 放得下且可读（≥9pt）用 A4，否则升 A3；A3 仍不足则触发自动合并
+      const sA4 = scaleFor('a4', layout);
+      if (sA4 >= minFontScale) return { page: 'a4', layout, scale: sA4 };
+      const sA3 = scaleFor('a3', layout);
+      if (sA3 >= minFontScale) return { page: 'a3', layout, scale: sA3 };
       return null;
     }
     const s = scaleFor(opts.pageMode, layout);
-    return s >= MIN_MANUAL ? { page: opts.pageMode, layout, scale: s } : null;
+    return { page: opts.pageMode, layout, scale: s };
   };
 
   let chosen: { page: PageKey; layout: LayoutResult; scale: number } | null = null;
@@ -237,14 +238,12 @@ export function fitLayout(tree: EquityTree, opts: FitOptions): FitResult {
   // 页面紧凑时由标签布局自动缩小字号并加大间距，确保不遮挡股权线
   const layout = attachRatioLabels(chosen.layout, 'both');
   const page = chosen.page;
-  // 最终缩放：图表整体面积约占页面 4/5（线性约 89.4%），不铺满整页；
-  // 内容过小时仍按可读上限，放不下时绝不超出页面范围
+  // 最终缩放：常规情况下图表约占页面 4/5（线性约 89.4%）；
+  // 可读性优先——最终字号不得低于 fontMinSize（9pt），页面放不下时以字号下限为准并提示
   const fitScale = scaleFor(page, layout);
-  const s = Math.min(clampScale(fitScale) * 0.894, fitScale);
-  if (fitScale < MIN_ALLOWED) {
-    warnings.push('内容较多，图表已按最小可读尺寸缩放；建议切换纵向文本框或调低合并阈值/拆分展示');
-  } else if (s < 0.0088) {
-    warnings.push('图表字号偏小（已自动选用 A3 大版面），可开启自动合并或拆分展示以提升可读性');
+  const s = Math.max(Math.min(clampScale(fitScale) * 0.894, fitScale), minFontScale);
+  if (fitScale < minFontScale) {
+    warnings.push(`内容较多，图表在 ${page.toUpperCase()} 上无法按 ${opts.fontMinSize ?? 9}pt 字号完整放下；已保持最小字号，建议减少股东数量或开启低比例合并/拆分展示`);
   }
   return {
     tree: current,

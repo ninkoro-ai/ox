@@ -54,6 +54,7 @@ export function buildEquityTree(
     mergedCount: 1,
     mergedSum: null,
     regPlace: '中国',
+    control: true,
   };
   nodes.push(root);
   nodeOf.set(rootId, root);
@@ -120,6 +121,7 @@ export function buildEquityTree(
         // 若该主体在新路径上应继续穿透而此前未展开，则补充展开
         if (ex.stopReason !== 'expanded' && reason === 'expanded' && ex.level < opts.maxLevel) {
           ex.stopReason = 'expanded';
+          ex.control = true;
           queue.push({ id: existingId, name: investor, ancestors: new Set([...cur.ancestors, investor]), deep });
         }
         if (ratio === null) unknownCount++;
@@ -141,6 +143,8 @@ export function buildEquityTree(
         mergedCount: 1,
         mergedSum: null,
         regPlace: isPerson ? undefined : inferRegPlace(investor, isOverseas),
+        // 控制链标记：第一层 ≥ 阈值或处于控制链上的节点（银行标准模式突出显示）
+        control: deep || curNode.isTarget,
       };
       nodes.push(child);
       nodeOf.set(childId, child);

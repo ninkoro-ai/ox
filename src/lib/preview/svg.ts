@@ -33,7 +33,7 @@ export function renderChartSvg(layout: LayoutResult, threshold: number): string 
 
   for (const n of layout.nodes) {
     parts.push(
-      `<rect x="${n.x}" y="${n.y}" width="${n.w}" height="${n.h}" rx="6" fill="none" stroke="#${NODE_BORDER}" stroke-width="${n.isTarget ? '1.8' : '1.2'}"/>`,
+      `<rect x="${n.x}" y="${n.y}" width="${n.w}" height="${n.h}" rx="6" fill="none" stroke="#${NODE_BORDER}" stroke-width="${n.isTarget || n.control ? '2.2' : '1.2'}"/>`,
     );
     const cx = n.x + n.w / 2;
     // 名称 + 注册地 + 标签整体在文本框内上下居中
@@ -45,7 +45,7 @@ export function renderChartSvg(layout: LayoutResult, threshold: number): string 
     for (let i = 0; i < n.lines.length; i++) {
       const y = ty + i * 17;
       parts.push(
-        `<text x="${cx}" y="${y}" text-anchor="middle" font-size="13" fill="#${NODE_TEXT}" font-weight="${n.isTarget ? '700' : '400'}">${esc(n.lines[i])}</text>`,
+        `<text x="${cx}" y="${y}" text-anchor="middle" font-size="13" fill="#${NODE_TEXT}" font-weight="${n.isTarget || n.control ? '700' : '400'}">${esc(n.lines[i])}</text>`,
       );
     }
     ty += namePx;

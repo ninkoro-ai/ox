@@ -28,9 +28,9 @@ export interface LayoutConfig {
 }
 
 export const DEFAULT_LAYOUT_CONFIG: LayoutConfig = {
-  hGap: 20,
+  hGap: 14,
   rowGap: 64,
-  margin: { top: 40, bottom: 40, left: 50, right: 50 },
+  margin: { top: 40, bottom: 40, left: 40, right: 40 },
   showRegPlace: true,
   zoneSplit: true,
   textLayout: 'horizontal',
@@ -56,19 +56,6 @@ export function layoutTree(
   const levelIds: string[][] = Array.from({ length: maxLevel + 1 }, () => []);
   for (const n of tree.nodes) levelIds[n.level].push(n.id);
 
-  // 主树：共享主体（去重后多路径）只归属首个父节点用于水平定位，
-  // 其余路径作为补充边绘制完整持股路径
-  const childrenOf = new Map<string, string[]>();
-  const primaryParent = new Map<string, string>();
-  for (const n of tree.nodes) {
-    for (const c of n.children) {
-      if (primaryParent.has(c)) continue;
-      primaryParent.set(c, n.id);
-      const list = childrenOf.get(n.id);
-      if (list) list.push(c);
-      else childrenOf.set(n.id, [c]);
-    }
-  }
   const nodeOf = new Map<string, TreeNode>(tree.nodes.map((n) => [n.id, n]));
   const sizes = new Map<string, { w: number; h: number; lines: string[] }>();
   for (const n of tree.nodes) {
@@ -78,7 +65,7 @@ export function layoutTree(
   // 文字方向规则：
   // - 用户选择纵向：整层纵向（一字一行，窄文本框）
   // - 股东数量较多（>= 7）且存在持股 <5% 的股东：混合模式——小股东纵向、其余横向
-  // - 默认横向：同一层股东等宽分布，高度统一
+  // - 默认横向：节点宽高按公司名称长度动态计算（不再强制同层等宽）
   for (const ids of levelIds) {
     const many = ids.length >= MANY_SHAREHOLDERS;
     const hasSmall = ids.some((id) => {
@@ -104,58 +91,44 @@ export function layoutTree(
           sizes.set(id, nodeSizeForWidth(n.name, undefined, n.tag, VERTICAL_NAME_W));
         }
       }
-    } else {
-      // 横向：同层等宽等高，名称尽量一行
-      const targetW = Math.max(...ids.map((id) => sizes.get(id)!.w));
-      const remeasured = ids.map((id) => {
-        const n = nodeOf.get(id)!;
-        return nodeSizeForWidth(n.name, regOf(n), n.tag, targetW);
-      });
-      const targetH = Math.max(...remeasured.map((s) => s.h));
-      ids.forEach((id, i) => {
-        sizes.set(id, { ...remeasured[i], h: Math.max(remeasured[i].h, targetH) });
-      });
     }
+    // 默认横向：保持动态尺寸
   }
 
-
-  // 槽位布局（两遍）：
-  // 第一遍自底向上计算每个节点的槽位宽度 = max(自身宽度, 子槽位总宽+间距)；
-  // 第二遍自顶向下分配槽位起点，把父节点偏移正确传递给子节点，避免深层树向左塌陷
-  const slot = new Map<string, { left: number; width: number }>();
-  const widthOf = new Map<string, number>();
-  const computeWidth = (id: string): number => {
-    const cached = widthOf.get(id);
-    if (cached !== undefined) return cached;
-    const kids = childrenOf.get(id) ?? [];
-    const w = sizes.get(id)!.w;
-    if (kids.length === 0) {
-      widthOf.set(id, w);
-      return w;
+  // 银行报告式分层布局：每层为一个横向“带”，同一层节点横向排列；
+  // 同一层节点超过 MAX_PER_ROW（默认 5）个时自动换行（每行最多 5 个，行号 0 起）
+  const rowOf = new Map<string, number>();
+  const levelRowsList = levelIds.map((ids) => {
+    const rows: string[][] = [];
+    for (let i = 0; i < ids.length; i += MAX_PER_ROW) rows.push(ids.slice(i, i + MAX_PER_ROW));
+    rows.forEach((r, ri) => r.forEach((k) => rowOf.set(k, ri)));
+    return rows;
+  });
+  const levelRowW = levelRowsList.map((rows) =>
+    Math.max(
+      0,
+      ...rows.map((r) => r.reduce((a, k) => a + sizes.get(k)!.w, 0) + cfg.hGap * (r.length - 1)),
+    ),
+  );
+  const overallW = Math.max(0, ...levelRowW);
+  const xOf = new Map<string, number>(); // 节点 -> 相对 margin.left 的左边距
+  levelRowsList.forEach((rows) => {
+    for (const r of rows) {
+      const rw = r.reduce((a, k) => a + sizes.get(k)!.w, 0) + cfg.hGap * (r.length - 1);
+      let cur = (overallW - rw) / 2;
+      for (const k of r) {
+        xOf.set(k, cur);
+        cur += sizes.get(k)!.w + cfg.hGap;
+      }
     }
-    const kidWidths = kids.map((k) => computeWidth(k));
-    const total = kidWidths.reduce((a, b) => a + b, 0) + cfg.hGap * (kids.length - 1);
-    const width = Math.max(w, total);
-    widthOf.set(id, width);
-    return width;
-  };
-  const rootSlotWidth = computeWidth(root.id);
-  const assignLeft = (id: string, left: number) => {
-    const kids = childrenOf.get(id) ?? [];
-    const w = widthOf.get(id)!;
-    slot.set(id, { left, width: w });
-    if (kids.length === 0) return;
-    const total = kids.reduce((a, k) => a + widthOf.get(k)!, 0) + cfg.hGap * (kids.length - 1);
-    let cur = left + (w - total) / 2;
-    for (const k of kids) {
-      assignLeft(k, cur);
-      cur += widthOf.get(k)! + cfg.hGap;
-    }
-  };
-  assignLeft(root.id, 0);
+  });
 
-  // 层级与行高
-  const levelH = levelIds.map((ids) => Math.max(0, ...ids.map((id) => sizes.get(id)!.h)));
+  // 层级与行高：每层由若干行组成（同层超过 5 个股东时换行）
+  const levelRowH = levelIds.map((ids) => Math.max(0, ...ids.map((id) => sizes.get(id)!.h)));
+  const levelRows = levelRowsList.map((rows) => rows.length);
+  const levelH = levelIds.map((_, L) =>
+    levelRows[L] > 0 ? levelRows[L] * levelRowH[L] + (levelRows[L] - 1) * ROW_GAP : 0,
+  );
 
   // 自下而上：目标企业（level 0）在最底部，股东逐级向上
   const totalH = levelH.reduce((a, b) => a + b, 0) + cfg.rowGap * maxLevel;
@@ -170,10 +143,9 @@ export function layoutTree(
 
   const layoutNodes: LayoutNode[] = [];
   for (const n of tree.nodes) {
-    const s = slot.get(n.id)!;
     const size = sizes.get(n.id)!;
-    const x = cfg.margin.left + s.left + s.width / 2 - size.w / 2;
-    const y = yAbs[n.level] + shiftY;
+    const x = cfg.margin.left + xOf.get(n.id)!;
+    const y = yAbs[n.level] + (rowOf.get(n.id) ?? 0) * (levelRowH[n.level] + ROW_GAP) + shiftY;
     layoutNodes.push({
       id: n.id,
       name: n.name,
@@ -189,6 +161,8 @@ export function layoutTree(
       regPlace: regOf(n),
       isTarget: n.isTarget,
       isMerged: n.isMerged,
+      control: n.control ?? false,
+      row: rowOf.get(n.id),
     });
   }
 
@@ -202,7 +176,8 @@ export function layoutTree(
   const segments: LayoutSegment[] = [];
   const nodeRects = layoutNodes.map((n) => ({ x: n.x, y: n.y, w: n.w, h: n.h }));
   let laneCounter = 0;
-  const nextLane = () => 12 + laneCounter++ * 10;
+  // 车道一律放在左侧留白内（margin.left=40），避免进入文本框区域
+  const nextLane = () => Math.min(8 + laneCounter++ * 8, 34);
   const byTo = new Map<string, Array<{ fromId: string; ratio: number | null }>>();
   for (const e of tree.edges) {
     const list = byTo.get(e.toId);
@@ -228,6 +203,23 @@ export function layoutTree(
     return f.x + f.w / 2 + (used - (total - 1) / 2) * 7;
   };
 
+  // 通用车道路径：投资方在上时从底边引出、进入被投资企业顶边；
+  // 同层/逆向补充边时从顶边引出（先进入上方空隙），统一进入被投资企业顶边，
+  // 避免竖直段穿过文本框
+  const routeLanePath = (f: LayoutNode, to: LayoutNode, laneX: number): void => {
+    const fromAbove = f.y + f.h <= to.y + 1;
+    const exitX = dropX(f);
+    const exitY = fromAbove ? f.y + f.h : f.y;
+    const exitDir = fromAbove ? 4 : -4;
+    const enterX = to.x + to.w / 2;
+    const laneEndY = to.y - 14;
+    segments.push({ x1: exitX, y1: exitY, x2: exitX, y2: exitY + exitDir, arrow: false, edgeId: f.id, kind: 'drop', control: f.control });
+    segments.push({ x1: exitX, y1: exitY + exitDir, x2: laneX, y2: exitY + exitDir, arrow: false, edgeId: f.id, kind: 'drop', control: f.control });
+    segments.push({ x1: laneX, y1: exitY + exitDir, x2: laneX, y2: laneEndY, arrow: false, edgeId: f.id, kind: 'drop', control: f.control });
+    segments.push({ x1: laneX, y1: laneEndY, x2: enterX, y2: laneEndY, arrow: false, edgeId: f.id, kind: 'drop', control: f.control });
+    segments.push({ x1: enterX, y1: laneEndY, x2: enterX, y2: to.y, arrow: true, edgeId: f.id, kind: 'entry', control: f.control });
+  };
+
   for (const [toId, incoming] of byTo) {
     const to = nodeById.get(toId)!;
     const froms = incoming
@@ -236,19 +228,32 @@ export function layoutTree(
       .sort((a, b) => a.x - b.x);
     if (froms.length === 0) continue;
 
+    // 换行布局中位于第 1 行及以下的股东，其竖直引出线会穿过上一行文本框，必须走左侧车道
+    const needsLane = (f: LayoutNode, targetY: number): boolean =>
+      (f.row ?? 0) > 0 || crossesAny(dropX(f), f.y + f.h, dropX(f), targetY, nodeRects);
+
     if (froms.length === 1) {
       const f = froms[0];
+      if (f.y + f.h > to.y + 1) {
+        // 同层/逆向补充边：走独立车道，不参与总线
+        routeLanePath(f, to, nextLane());
+        continue;
+      }
       const sx = dropX(f);
       const sy = f.y + f.h;
+      // 直连仅当引出线不与任何文本框相交且落点在被投资企业上边沿内时使用；
+      // 否则走左侧车道，保证箭头明确指向被投资企业
       if (
-        crossesAny(sx, sy, sx, to.y, nodeRects)
+        needsLane(f, to.y) ||
+        sx < to.x + 1 ||
+        sx > to.x + to.w - 1
       ) {
         // 直连会穿过其他文本框时（共享主体长距离边、境外股东等），从页面左侧绕行
         const laneX = nextLane();
-        segments.push({ x1: sx, y1: sy, x2: sx, y2: sy + 4, arrow: false, edgeId: f.id, kind: 'drop' });
-        segments.push({ x1: sx, y1: sy + 4, x2: laneX, y2: sy + 4, arrow: false, edgeId: f.id, kind: 'drop' });
-        segments.push({ x1: laneX, y1: sy + 4, x2: laneX, y2: to.y - 14, arrow: false, edgeId: f.id, kind: 'drop' });
-        segments.push({ x1: laneX, y1: to.y - 14, x2: to.x + to.w / 2, y2: to.y - 14, arrow: false, edgeId: f.id, kind: 'drop' });
+        segments.push({ x1: sx, y1: sy, x2: sx, y2: sy + 4, arrow: false, edgeId: f.id, kind: 'drop', control: f.control });
+        segments.push({ x1: sx, y1: sy + 4, x2: laneX, y2: sy + 4, arrow: false, edgeId: f.id, kind: 'drop', control: f.control });
+        segments.push({ x1: laneX, y1: sy + 4, x2: laneX, y2: to.y - 14, arrow: false, edgeId: f.id, kind: 'drop', control: f.control });
+        segments.push({ x1: laneX, y1: to.y - 14, x2: to.x + to.w / 2, y2: to.y - 14, arrow: false, edgeId: f.id, kind: 'drop', control: f.control });
         segments.push({
           x1: to.x + to.w / 2,
           y1: to.y - 14,
@@ -257,6 +262,7 @@ export function layoutTree(
           arrow: true,
           edgeId: f.id,
           kind: 'entry',
+          control: f.control,
         });
         continue;
       }
@@ -268,6 +274,7 @@ export function layoutTree(
         arrow: true,
         edgeId: f.id,
         kind: 'entry',
+        control: f.control,
       });
       continue;
     }
@@ -278,16 +285,18 @@ export function layoutTree(
     const busY = Math.min(gapTop + (gapBottom - gapTop) * 0.5, to.y - 24);
     let minX = Infinity;
     let maxX = -Infinity;
+    const laneFroms: LayoutNode[] = [];
+    const invertedFroms: LayoutNode[] = [];
     froms.forEach((f) => {
+      if (f.y + f.h > to.y + 1) {
+        invertedFroms.push(f);
+        return;
+      }
       const sx = dropX(f);
       const sy = f.y + f.h;
-      if (crossesAny(sx, sy, sx, busY, nodeRects)) {
-        // 向下会穿过其他文本框时（共享主体长距离边、境外股东等），从页面左侧绕行接入总线
-        const laneX = nextLane();
-        minX = Math.min(minX, laneX);
-        segments.push({ x1: sx, y1: sy, x2: sx, y2: sy + 4, arrow: false, edgeId: f.id, kind: 'drop' });
-        segments.push({ x1: sx, y1: sy + 4, x2: laneX, y2: sy + 4, arrow: false, edgeId: f.id, kind: 'drop' });
-        segments.push({ x1: laneX, y1: sy + 4, x2: laneX, y2: busY, arrow: false, edgeId: f.id, kind: 'drop' });
+      if (needsLane(f, busY)) {
+        // 换行第 1 行及以下或直连穿框的股东：先到左侧共享车道，再接入总线
+        laneFroms.push(f);
         return;
       }
       minX = Math.min(minX, sx);
@@ -300,8 +309,35 @@ export function layoutTree(
         arrow: false,
         edgeId: f.id,
         kind: 'drop',
+        control: f.control,
       });
     });
+    for (const f of invertedFroms) {
+      // 同层/逆向补充边各自走独立车道（不参与总线，避免方向冲突）
+      routeLanePath(f, to, nextLane());
+    }
+    if (laneFroms.length > 0) {
+      // 同一被投资企业的所有换行股东共享一条车道：车道从最上方引出点直通总线
+      const laneX = nextLane();
+      const laneTop = Math.min(...laneFroms.map((f) => f.y + f.h));
+      for (const f of laneFroms) {
+        const sx = dropX(f);
+        const sy = f.y + f.h;
+        segments.push({ x1: sx, y1: sy, x2: sx, y2: sy + 4, arrow: false, edgeId: f.id, kind: 'drop', control: f.control });
+        segments.push({ x1: sx, y1: sy + 4, x2: laneX, y2: sy + 4, arrow: false, edgeId: f.id, kind: 'drop', control: f.control });
+      }
+      segments.push({
+        x1: laneX,
+        y1: laneTop,
+        x2: laneX,
+        y2: busY,
+        arrow: false,
+        edgeId: toId,
+        kind: 'drop',
+        control: to.control ?? false,
+      });
+      minX = Math.min(minX, laneX);
+    }
     // 各层级展示规范一致：多股东汇聚到任一被投资企业时，总线末端只保留一个箭头
     const cx = to.x + to.w / 2;
     minX = Math.min(minX, cx);
@@ -314,6 +350,7 @@ export function layoutTree(
       arrow: true,
       edgeId: to.id,
       kind: 'entry',
+      control: to.control ?? false,
     });
     segments.push({
       x1: minX,
@@ -323,10 +360,11 @@ export function layoutTree(
       arrow: false,
       edgeId: toId,
       kind: 'bus',
+      control: to.control ?? false,
     });
   }
 
-  const width = cfg.margin.left + rootSlotWidth + cfg.margin.right;
+  const width = cfg.margin.left + overallW + cfg.margin.right;
   const height = Math.max(...layoutNodes.map((n) => n.y + n.h), cfg.margin.top) + cfg.margin.bottom;
   // 布局阶段的股权关系边：携带 ratio 与 label，labelPosition 由 attachRatioLabels 填充
   const edges: EquityEdge[] = tree.edges.map((e) => ({
@@ -334,6 +372,7 @@ export function layoutTree(
     toId: e.toId,
     ratio: e.ratio,
     label: e.label,
+    control: nodeOf.get(e.fromId)?.control ?? false,
   }));
 
   const layout: LayoutResult = {
@@ -389,8 +428,9 @@ function rectsOverlap(
 }
 
 /**
- * 境内/境外分区：当境外股东无法自然位于境内节点上方（同层或交错）时，
- * 将境外节点统一提升到顶部一行，境内节点在虚线下方按层纵向排列。
+ * 境内/境外分区：当境外股东无法自然位于境内节点上方时，
+ * 将境外节点统一提升到顶部（超过 5 个同样换行），境内节点整体下移至虚线下方，
+ * 保留各层横向“带”排列。
  */
 function applyZoneSplit(nodes: LayoutNode[], cfg: LayoutConfig): boolean {
   const overseas = nodes.filter((n) => n.stopReason === 'overseas');
@@ -402,29 +442,21 @@ function applyZoneSplit(nodes: LayoutNode[], cfg: LayoutConfig): boolean {
   // 已能自然画出分隔线（境外全部在上且空间足够）时无需调整
   if (overseasBottom + BOUNDARY_MIN_PAD + BOUNDARY_LABEL_H + 8 <= domesticTop) return false;
 
-  // 境外股东统一提升到顶部一行
+  // 境外股东统一提升到顶部，超过 MAX_PER_ROW 个时换行排列
   const ovTop = Math.min(...overseas.map((n) => n.y));
-  const ovMaxH = Math.max(...overseas.map((n) => n.h));
-  for (const n of overseas) {
-    n.y = ovTop;
-    n.h = ovMaxH;
-  }
-  const ovBottom = ovTop + ovMaxH;
+  const ovRowH = Math.max(...overseas.map((n) => n.h));
+  const ovRows: LayoutNode[][] = [];
+  for (let i = 0; i < overseas.length; i += MAX_PER_ROW) ovRows.push(overseas.slice(i, i + MAX_PER_ROW));
+  ovRows.forEach((r, ri) => {
+    for (const n of r) n.y = ovTop + ri * (ovRowH + ROW_GAP);
+  });
+  const ovBottom = ovTop + (ovRows.length - 1) * (ovRowH + ROW_GAP) + ovRowH;
   const boundaryY = Math.max(ovBottom + BOUNDARY_PAD, ovBottom + BOUNDARY_MIN_PAD);
 
-  // 境内节点在虚线下方按层纵向排列（层号大者在上，目标企业 level 0 在最下）
-  const levels = [...new Set(domestic.map((n) => n.level))].sort((a, b) => b - a);
-  const levelH = new Map<number, number>();
-  for (const L of levels) {
-    levelH.set(L, Math.max(...domestic.filter((n) => n.level === L).map((n) => n.h)));
-  }
-  let cursor = boundaryY + BOUNDARY_LABEL_H + 10;
-  const yOf = new Map<number, number>();
-  for (const L of levels) {
-    yOf.set(L, cursor);
-    cursor += cfg.rowGap + levelH.get(L)!;
-  }
-  for (const n of domestic) n.y = yOf.get(n.level)!;
+  // 境内节点整体下移到虚线下方，保留原有横向带与行排列
+  const minDomesticY = Math.min(...domestic.map((n) => n.y));
+  const dy = boundaryY + BOUNDARY_LABEL_H + 10 - minDomesticY;
+  for (const n of domestic) n.y += dy;
   return true;
 }
 
@@ -433,6 +465,8 @@ export type RatioLabelSideMode = 'both' | 'right';
 const LABEL_GAP = 6; // 比例标签与连接线的水平间距
 const COMPACT_LABEL_FONT = 8; // 页面紧凑时比例标签缩小后的字号
 const VERTICAL_NAME_W = 34; // 纵向排版时文本框宽度（约一个字宽）
+const MAX_PER_ROW = 5; // 同一父节点下每行最多节点数：超过自动换行
+const ROW_GAP = 24; // 同层内行与行之间的竖直间距（放引出线）
 const MANY_SHAREHOLDERS = 7; // 同层股东数量达到该值视为“较多”，触发混合排版
 const SMALL_RATIO = 5; // 混合排版中持股低于该百分比（%）的股东使用纵向文本框
 const BOUNDARY_PAD = 26; // 分隔线与境外节点底部的间距（含“境外”标签）
