@@ -1,6 +1,7 @@
 export interface SettingsState {
   threshold: number;
   mergeRatio: number;
+  mergeStartLevel: number;
   showBelowThreshold: boolean;
   stopNatural: boolean;
   stopOverseas: boolean;
@@ -22,6 +23,7 @@ interface Props {
 export const DEFAULT_SETTINGS: SettingsState = {
   threshold: 25,
   mergeRatio: 25,
+  mergeStartLevel: 2,
   showBelowThreshold: true,
   stopNatural: true,
   stopOverseas: true,
@@ -72,6 +74,19 @@ export default function SettingsPanel({ settings, onChange, disabled }: Props) {
             onChange={(e) => set({ mergeRatio: num(e.target.value, 25, 0, 100) })}
           />
           <small>持股低于该比例的股东可归并（勾选下方选项）</small>
+        </label>
+        <label>
+          合并起始层级
+          <input
+            type="number"
+            min={1}
+            max={20}
+            step={1}
+            value={settings.mergeStartLevel}
+            disabled={disabled}
+            onChange={(e) => set({ mergeStartLevel: num(e.target.value, 2, 1, 20) })}
+          />
+          <small>默认 2：第一层（直接股东）不参与合并，从第 N 层起生效</small>
         </label>
         <label>
           持股比例小数位

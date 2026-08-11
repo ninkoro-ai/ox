@@ -57,6 +57,7 @@ export default function App() {
       const f = fitLayout(tree, {
         pageMode: settings.pageMode,
         mergeRatio: settings.mergeRatio,
+        mergeStartLevel: settings.mergeStartLevel,
         autoMerge: settings.autoMerge,
         showRegPlace: settings.showRegPlace,
         mergeBelow: settings.mergeBelow,
@@ -69,7 +70,7 @@ export default function App() {
       setError(`图表生成失败：${e instanceof Error ? e.message : String(e)}`);
       return null;
     }
-  }, [tree, settings.pageMode, settings.mergeRatio, settings.autoMerge, settings.showRegPlace, settings.mergeBelow, settings.ratioPrecision, settings.textLayout]);
+  }, [tree, settings.pageMode, settings.mergeRatio, settings.mergeStartLevel, settings.autoMerge, settings.showRegPlace, settings.mergeBelow, settings.ratioPrecision, settings.textLayout]);
 
   const layoutCheck = useMemo(() => (fit ? checkLayout(fit.layout) : null), [fit]);
   const svg = useMemo(

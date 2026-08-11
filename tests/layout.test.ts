@@ -102,6 +102,7 @@ describe('布局引擎', () => {
     const fit = fitLayout(tree, {
       pageMode: 'auto',
       mergeRatio: 25,
+      mergeStartLevel: 1,
       autoMerge: true,
       showRegPlace: true,
       mergeBelow: false,
@@ -121,6 +122,7 @@ describe('布局引擎', () => {
     const fit = fitLayout(tree, {
       pageMode: 'auto',
       mergeRatio: 10,
+      mergeStartLevel: 1,
       autoMerge: false,
       showRegPlace: true,
       mergeBelow: true,
@@ -142,6 +144,7 @@ describe('布局引擎', () => {
     const fit = fitLayout(tree, {
       pageMode: 'auto',
       mergeRatio: 10,
+      mergeStartLevel: 1,
       autoMerge: false,
       showRegPlace: true,
       mergeBelow: true,
@@ -150,6 +153,54 @@ describe('布局引擎', () => {
     const level1 = fit.layout.nodes.filter((n) => n.level === 1).sort((a, b) => a.x - b.x);
     expect(level1.map((n) => n.name)).toEqual(['股东A', '股东B', '其他单一持股不超过10%的股东']);
     expect(level1[level1.length - 1].isMerged).toBe(true);
+  });
+
+  it('合并阈值默认从第二层生效：第一层不合并，第二层起合并', () => {
+    const tree = makeTree([
+      { investor: 'A公司', investee: '目标公司', ratio: 60 },
+      { investor: 'B公司', investee: '目标公司', ratio: 8 },
+      { investor: 'C公司', investee: '目标公司', ratio: 5 },
+      { investor: 'D公司', investee: 'A公司', ratio: 3 },
+      { investor: 'E公司', investee: 'A公司', ratio: 2 },
+    ]);
+    const fit = fitLayout(tree, {
+      pageMode: 'auto',
+      mergeRatio: 10,
+      autoMerge: false,
+      showRegPlace: true,
+      mergeBelow: true,
+      ratioPrecision: 2,
+    });
+    // 第一层 B/C（8%、5%）低于阈值但不参与合并，仍单独列示
+    const level1 = fit.tree.nodes.filter((n) => n.level === 1);
+    expect(level1.map((n) => n.name)).toEqual(expect.arrayContaining(['B公司', 'C公司']));
+    expect(level1.length).toBe(3);
+    // 第二层 D/E（3%、2%）合并为一个“其他单一持股不超过10%的股东”
+    const merged = fit.tree.nodes.find((n) => n.name.includes('其他单一持股不超过10%'));
+    expect(merged).toBeDefined();
+    expect(merged?.level).toBe(2);
+    expect(merged?.mergedSum).toBeCloseTo(5, 2);
+  });
+
+  it('用户可设置合并起始层级为第一层', () => {
+    const tree = makeTree([
+      { investor: 'A公司', investee: '目标公司', ratio: 60 },
+      { investor: 'B公司', investee: '目标公司', ratio: 8 },
+      { investor: 'C公司', investee: '目标公司', ratio: 5 },
+    ]);
+    const fit = fitLayout(tree, {
+      pageMode: 'auto',
+      mergeRatio: 10,
+      mergeStartLevel: 1,
+      autoMerge: false,
+      showRegPlace: true,
+      mergeBelow: true,
+      ratioPrecision: 2,
+    });
+    const merged = fit.tree.nodes.find((n) => n.name.includes('其他单一持股不超过10%'));
+    expect(merged).toBeDefined();
+    expect(merged?.level).toBe(1);
+    expect(fit.tree.nodes.filter((n) => n.level === 1).length).toBe(2);
   });
 
   it('境外股东与境内股东同层时仍生成虚线且境外在上', () => {

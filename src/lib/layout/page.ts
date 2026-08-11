@@ -37,6 +37,8 @@ function clampScale(s: number): number {
 export interface FitOptions {
   pageMode: PageMode;
   mergeRatio: number;
+  /** 合并起始层级：默认 2，即第一层（目标企业直接股东）不参与低比例合并，从第二层起生效 */
+  mergeStartLevel?: number;
   autoMerge: boolean;
   showRegPlace: boolean;
   mergeBelow: boolean; // 生成前按用户阈值归并低比例股东
@@ -80,6 +82,7 @@ export function mergeLowRatio(
   tree: EquityTree,
   mergeRatio: number,
   precision = 2,
+  mergeStartLevel = 2,
 ): { tree: EquityTree; merged: boolean; groups: number } {
   let groups = 0;
   const nodes: TreeNode[] = tree.nodes.map((n) => ({ ...n, children: [...n.children] }));
@@ -107,6 +110,7 @@ export function mergeLowRatio(
     const mergeable = kids.filter(
       (k) =>
         !k.isTarget &&
+        k.level >= mergeStartLevel &&
         (k.ratio === null || (k.ratio < mergeRatio && k.children.length === 0)) &&
         (parentCount.get(k.id) ?? 0) === 1,
     );
@@ -180,7 +184,7 @@ export function fitLayout(tree: EquityTree, opts: FitOptions): FitResult {
 
   // 用户选项：生成前直接按阈值归并低比例股东
   if (opts.mergeBelow) {
-    const res = mergeLowRatio(current, opts.mergeRatio, opts.ratioPrecision);
+    const res = mergeLowRatio(current, opts.mergeRatio, opts.ratioPrecision, opts.mergeStartLevel ?? 2);
     if (res.merged) {
       current = res.tree;
       mergedGroups += res.groups;
@@ -218,7 +222,7 @@ export function fitLayout(tree: EquityTree, opts: FitOptions): FitResult {
       break;
     }
     if (!opts.autoMerge) break;
-    const res = mergeLowRatio(current, opts.mergeRatio, opts.ratioPrecision);
+    const res = mergeLowRatio(current, opts.mergeRatio, opts.ratioPrecision, opts.mergeStartLevel ?? 2);
     if (!res.merged) break;
     current = res.tree;
     mergedGroups += res.groups;
