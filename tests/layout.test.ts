@@ -233,4 +233,27 @@ describe('布局引擎', () => {
     expect(report.nodeOverlaps).toBe(0);
     expect(report.segmentNodeHits).toBe(0);
   });
+
+  it('共享主体（多路径叶子）不参与归并，自动合并不产生悬空引用', () => {
+    const tree = makeTree([
+      { investor: '大股东A', investee: '目标公司', ratio: 51 },
+      { investor: '大股东B', investee: '目标公司', ratio: 30 },
+      { investor: '共享公司C', investee: '大股东A', ratio: 5 },
+      { investor: '共享公司C', investee: '大股东B', ratio: 5 },
+    ]);
+    const fit = fitLayout(tree, {
+      pageMode: 'auto',
+      mergeRatio: 25,
+      autoMerge: true,
+      showRegPlace: true,
+      mergeBelow: false,
+      ratioPrecision: 2,
+      textLayout: 'horizontal',
+    });
+    const c = fit.tree.nodes.find((n) => n.name === '共享公司C');
+    expect(c).toBeDefined(); // 共享主体未被归并删除
+    const report = checkLayout(fit.layout);
+    expect(report.nodeOverlaps).toBe(0);
+    expect(report.segmentNodeHits).toBe(0);
+  });
 });

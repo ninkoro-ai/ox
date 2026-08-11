@@ -29,32 +29,46 @@ export default function App() {
 
   const tree = useMemo(() => {
     if (!parsed) return null;
-    return buildEquityTree(
-      parsed.targetName ?? '目标企业',
-      parsed.relations,
-      parsed.entityTypes ?? {},
-      {
-        threshold: settings.threshold,
-        stopAtNaturalPerson: settings.stopNatural,
-        stopAtOverseas: settings.stopOverseas,
-        showBelowThreshold: settings.showBelowThreshold,
-        maxLevel: settings.maxLevel,
-        ratioPrecision: settings.ratioPrecision,
-      },
-    );
+    try {
+      const t = buildEquityTree(
+        parsed.targetName ?? '目标企业',
+        parsed.relations,
+        parsed.entityTypes ?? {},
+        {
+          threshold: settings.threshold,
+          stopAtNaturalPerson: settings.stopNatural,
+          stopAtOverseas: settings.stopOverseas,
+          showBelowThreshold: settings.showBelowThreshold,
+          maxLevel: settings.maxLevel,
+          ratioPrecision: settings.ratioPrecision,
+        },
+      );
+      setError('');
+      return t;
+    } catch (e) {
+      setError(`数据处理失败：${e instanceof Error ? e.message : String(e)}`);
+      return null;
+    }
   }, [parsed, settings.threshold, settings.stopNatural, settings.stopOverseas, settings.showBelowThreshold, settings.maxLevel, settings.ratioPrecision]);
 
   const fit = useMemo(() => {
     if (!tree) return null;
-    return fitLayout(tree, {
-      pageMode: settings.pageMode,
-      mergeRatio: settings.mergeRatio,
-      autoMerge: settings.autoMerge,
-      showRegPlace: settings.showRegPlace,
-      mergeBelow: settings.mergeBelow,
-      ratioPrecision: settings.ratioPrecision,
-      textLayout: settings.textLayout,
-    });
+    try {
+      const f = fitLayout(tree, {
+        pageMode: settings.pageMode,
+        mergeRatio: settings.mergeRatio,
+        autoMerge: settings.autoMerge,
+        showRegPlace: settings.showRegPlace,
+        mergeBelow: settings.mergeBelow,
+        ratioPrecision: settings.ratioPrecision,
+        textLayout: settings.textLayout,
+      });
+      setError('');
+      return f;
+    } catch (e) {
+      setError(`图表生成失败：${e instanceof Error ? e.message : String(e)}`);
+      return null;
+    }
   }, [tree, settings.pageMode, settings.mergeRatio, settings.autoMerge, settings.showRegPlace, settings.mergeBelow, settings.ratioPrecision, settings.textLayout]);
 
   const layoutCheck = useMemo(() => (fit ? checkLayout(fit.layout) : null), [fit]);

@@ -83,6 +83,11 @@ export function mergeLowRatio(
   let groups = 0;
   const nodes: TreeNode[] = tree.nodes.map((n) => ({ ...n, children: [...n.children] }));
   const byId = new Map(nodes.map((n) => [n.id, n]));
+  // 记录每个节点的父节点（被投资企业）数量：共享主体（多路径）不参与归并，避免悬空引用
+  const parentCount = new Map<string, number>();
+  for (const n of nodes) {
+    for (const c of n.children) parentCount.set(c, (parentCount.get(c) ?? 0) + 1);
+  }
   const removed = new Set<string>();
   const collectSubtree = (id: string) => {
     const n = byId.get(id);
@@ -99,7 +104,10 @@ export function mergeLowRatio(
       .map((k) => byId.get(k))
       .filter((k): k is TreeNode => k !== undefined && !removed.has(k.id));
     const mergeable = kids.filter(
-      (k) => !k.isTarget && (k.ratio === null || (k.ratio < mergeRatio && k.children.length === 0)),
+      (k) =>
+        !k.isTarget &&
+        (k.ratio === null || (k.ratio < mergeRatio && k.children.length === 0)) &&
+        (parentCount.get(k.id) ?? 0) === 1,
     );
     if (mergeable.length < 2) continue;
 
