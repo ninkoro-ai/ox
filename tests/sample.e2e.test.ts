@@ -232,8 +232,8 @@ describe.skipIf(!existsSync(BEILAI))('复杂股权图（贝特莱）验收', () 
       ratioPrecision: 2,
       textLayout: 'horizontal',
     });
-    // 密集图自动升级到 A2 大版面，避免硬塞进 A3 导致文字溢出
-    expect(fit.page).toBe('a2');
+    // 密集图自动使用 A3 大版面（仅保留 A4/A3 自动适配）
+    expect(fit.page).toBe('a3');
     const report = checkLayout(fit.layout);
     expect(report.nodeOverlaps).toBe(0);
     expect(report.labelNodeHits).toBe(0);

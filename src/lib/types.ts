@@ -135,6 +135,29 @@ export interface RatioLabel {
   anchorY: number; // 所属连接线（标签对齐处）的 y
 }
 
+/** 比例标签位置：由布局阶段计算并写入 EquityEdge.labelPosition */
+export interface RatioLabelPosition {
+  side: RatioLabelSide;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  anchorX: number; // 所属连接线的 x
+  anchorY: number; // 所属连接线（标签对齐处）的 y
+}
+
+/**
+ * 股权关系边：持股比例提升为 Edge 属性，布局阶段负责计算连线路径（segments）
+ * 与标签位置（labelPosition），PPT 生成阶段据此绘制连线和比例。
+ */
+export interface EquityEdge {
+  fromId: string;
+  toId: string;
+  ratio: number | null;
+  label: string;
+  labelPosition?: RatioLabelPosition;
+}
+
 /** 境内 / 境外分隔虚线 */
 export interface LayoutBoundary {
   y: number;
@@ -142,21 +165,37 @@ export interface LayoutBoundary {
   x2: number;
 }
 
-export interface LayoutEdge {
-  fromId: string;
-  toId: string;
-  label: string;
-}
-
 export interface LayoutResult {
   nodes: LayoutNode[];
   segments: LayoutSegment[];
-  edges: LayoutEdge[];
+  edges: EquityEdge[];
+  /** 兼容投影：由 edges 的 labelPosition 生成，供预览与旧逻辑使用 */
   labels: RatioLabel[];
   boundary: LayoutBoundary | null;
   width: number;
   height: number;
 }
 
-export type PageKey = '16x9' | 'a4' | 'a3' | 'a2';
+export type PageKey = 'a4' | 'a3';
 export type PageMode = 'auto' | PageKey;
+
+/**
+ * 统一生成配置：贯穿解析、穿透、布局与 PPT 生成全流程
+ */
+export interface GenerateConfig {
+  /** 穿透阈值（%）：仅第一层持股 ≥ 阈值的股东触发穿透，默认 25 */
+  penetrationThreshold: number;
+  /** 低比例股东合并阈值（%）：默认 5 */
+  minorShareholderThreshold: number;
+  /** 页面尺寸：auto（A4 → A3 自动适配）| a4 | a3 */
+  pageSize: PageMode;
+  /** 最小字号（pt）：PPT 中文本框字号下限，默认 8 */
+  fontMinSize: number;
+}
+
+export const DEFAULT_GENERATE_CONFIG: GenerateConfig = {
+  penetrationThreshold: 25,
+  minorShareholderThreshold: 5,
+  pageSize: 'auto',
+  fontMinSize: 8,
+};

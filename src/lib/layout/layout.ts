@@ -1,7 +1,7 @@
 import type {
+  EquityEdge,
   EquityTree,
   LayoutBoundary,
-  LayoutEdge,
   LayoutNode,
   LayoutResult,
   LayoutSegment,
@@ -328,9 +328,11 @@ export function layoutTree(
 
   const width = cfg.margin.left + rootSlotWidth + cfg.margin.right;
   const height = Math.max(...layoutNodes.map((n) => n.y + n.h), cfg.margin.top) + cfg.margin.bottom;
-  const edges: LayoutEdge[] = tree.edges.map((e) => ({
+  // 布局阶段的股权关系边：携带 ratio 与 label，labelPosition 由 attachRatioLabels 填充
+  const edges: EquityEdge[] = tree.edges.map((e) => ({
     fromId: e.fromId,
     toId: e.toId,
+    ratio: e.ratio,
     label: e.label,
   }));
 
@@ -600,6 +602,19 @@ export function attachRatioLabels(
         anchorX: seg.x1,
         anchorY,
       });
+      // 持股比例提升为 Edge 属性：位置写入 EquityEdge.labelPosition，供 PPT 生成阶段使用
+      const edge = layout.edges.find((ed) => ed.fromId === e.fromId && ed.toId === toId);
+      if (edge) {
+        edge.labelPosition = {
+          side: chosen.side,
+          x: chosen.x,
+          y: chosen.y,
+          w: size.w,
+          h: size.h,
+          anchorX: seg.x1,
+          anchorY,
+        };
+      }
     });
   }
 

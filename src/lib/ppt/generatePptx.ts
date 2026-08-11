@@ -14,6 +14,8 @@ export interface GeneratePptOptions {
   threshold: number;
   mergeRatio: number;
   mergedGroups: number;
+  /** 最小字号（pt）：文本框字号下限（容量不足时仍会继续收缩以保证不溢出） */
+  fontMinSize?: number;
 }
 
 const AREA_LEFT_IN = 0.55;
@@ -75,7 +77,8 @@ export async function generatePptx(
   }
 
   const toIn = (v: number) => v * opts.pxToIn;
-  const toPt = (px: number) => Math.max(8, Math.min(40, px * opts.pxToIn * 72));
+  const fontMin = opts.fontMinSize ?? 8;
+  const toPt = (px: number) => Math.max(fontMin, Math.min(40, px * opts.pxToIn * 72));
   // 比例标签单行显示：盒子窄时缩小字号而不是折行
   const fitRatioPt = (text: string, wIn: number): number => {
     const baseW = textWidth(text, 10);
@@ -183,10 +186,12 @@ export async function generatePptx(
     });
   }
 
-  // 持股比例：位于股权线两侧、线中间位置（左下/右下方位），不与线相交
-  for (const l of opts.layout.labels ?? []) {
-    const fontSize = fitRatioPt(l.text, toIn(l.w));
-    slide.addText(l.text, {
+  // 持股比例：由 EquityEdge 的 labelPosition 定位，位于股权线两侧、线中间位置（左下/右下方位），不与线相交
+  for (const e of opts.layout.edges) {
+    const l = e.labelPosition;
+    if (!l) continue;
+    const fontSize = fitRatioPt(e.label, toIn(l.w));
+    slide.addText(e.label, {
       x: toX(l.x),
       y: toY(l.y),
       w: Math.max(toIn(l.w), 0.02),

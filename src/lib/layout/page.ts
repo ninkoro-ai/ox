@@ -3,10 +3,8 @@ import { formatNum } from '../excel/ratio';
 import { attachRatioLabels, DEFAULT_LAYOUT_CONFIG, layoutTree } from './layout';
 
 export const PAGES: Record<PageKey, { name: string; wIn: number; hIn: number }> = {
-  '16x9': { name: '16:9', wIn: 13.333, hIn: 7.5 },
   a4: { name: 'A4 横向', wIn: 11.69, hIn: 8.27 },
   a3: { name: 'A3 横向', wIn: 16.535, hIn: 11.693 },
-  a2: { name: 'A2 横向', wIn: 23.39, hIn: 16.54 },
 };
 
 const MARGIN_X_IN = 0.55;
@@ -14,10 +12,8 @@ const MARGIN_TOP_IN = 1.15;
 const MARGIN_BOTTOM_IN = 0.4;
 // pxToIn 单位：英寸/像素。名称字号 13px 对应 pt = 13 * pxToIn * 72。
 // 提高下限保证办公电脑/打印清晰可读：约 9pt 起（0.0095），页面放不下时自动升档到 A3
-const MIN_GOOD_16X9 = 0.0098;
 const MIN_GOOD_A4 = 0.0095;
 const MIN_GOOD_A3 = 0.0085;
-const MIN_GOOD_A2 = 0.0068;
 const MIN_MANUAL = 0.008;
 const MIN_ALLOWED = 0.0065;
 // 简单结构不放大铺满整页：名称 13px 最多约 15.5pt，图表保持“约半张 A4”的紧凑尺寸
@@ -201,11 +197,10 @@ export function fitLayout(tree: EquityTree, opts: FitOptions): FitResult {
       textLayout,
     });
     if (opts.pageMode === 'auto') {
-      // 简单结构优先 A4（约半张 A4 的紧凑版面），放不下再依次尝试 16:9、A3、A2
-      for (const page of ['a4', '16x9', 'a3', 'a2'] as PageKey[]) {
+      // 简单结构优先 A4（约半张 A4 的紧凑版面），放不下再尝试 A3
+      for (const page of ['a4', 'a3'] as PageKey[]) {
         const s = scaleFor(page, layout);
-        const min =
-          page === 'a4' ? MIN_GOOD_A4 : page === '16x9' ? MIN_GOOD_16X9 : page === 'a3' ? MIN_GOOD_A3 : MIN_GOOD_A2;
+        const min = page === 'a4' ? MIN_GOOD_A4 : MIN_GOOD_A3;
         if (s >= min) return { page, layout, scale: s };
       }
       return null;
@@ -229,7 +224,7 @@ export function fitLayout(tree: EquityTree, opts: FitOptions): FitResult {
   }
 
   if (!chosen) {
-    const page: PageKey = opts.pageMode === 'auto' ? 'a2' : opts.pageMode;
+    const page: PageKey = opts.pageMode === 'auto' ? 'a3' : opts.pageMode;
     const layout = layoutTree(current, {
       ...DEFAULT_LAYOUT_CONFIG,
       showRegPlace: opts.showRegPlace,
@@ -249,7 +244,7 @@ export function fitLayout(tree: EquityTree, opts: FitOptions): FitResult {
   if (fitScale < MIN_ALLOWED) {
     warnings.push('内容较多，图表已按最小可读尺寸缩放；建议切换纵向文本框或调低合并阈值/拆分展示');
   } else if (s < 0.0088) {
-    warnings.push('图表字号偏小（密集图已自动选用 A2 大版面），可开启自动合并或拆分展示以提升可读性');
+    warnings.push('图表字号偏小（已自动选用 A3 大版面），可开启自动合并或拆分展示以提升可读性');
   }
   return {
     tree: current,

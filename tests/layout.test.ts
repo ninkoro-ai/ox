@@ -4,6 +4,7 @@ import { buildEquityTree } from '../src/lib/graph/penetrate';
 import { checkLayout } from '../src/lib/layout/collision';
 import { fitLayout, PAGES } from '../src/lib/layout/page';
 import { applySegmentColors } from '../src/lib/layout/layout';
+import { DEFAULT_GENERATE_CONFIG } from '../src/lib/types';
 
 const OPTS = {
   threshold: 25,
@@ -18,6 +19,13 @@ function makeTree(relations: EquityRelation[]) {
 }
 
 describe('布局引擎', () => {
+  it('统一生成配置默认值：穿透 25%、合并 5%、页面自动、最小字号 8', () => {
+    expect(DEFAULT_GENERATE_CONFIG.penetrationThreshold).toBe(25);
+    expect(DEFAULT_GENERATE_CONFIG.minorShareholderThreshold).toBe(5);
+    expect(DEFAULT_GENERATE_CONFIG.pageSize).toBe('auto');
+    expect(DEFAULT_GENERATE_CONFIG.fontMinSize).toBe(8);
+  });
+
   it('小树无重叠，优先 A4 紧凑版面', () => {
     const tree = makeTree([
       { investor: '旭阳集团有限公司', investee: '目标公司', ratio: 80.48 },

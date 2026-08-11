@@ -7,7 +7,7 @@ import { buildEquityTree } from './lib/graph/penetrate';
 import { fitLayout } from './lib/layout/page';
 import { checkLayout } from './lib/layout/collision';
 import { renderChartSvg } from './lib/preview/svg';
-import type { ParsedResult } from './lib/types';
+import { DEFAULT_GENERATE_CONFIG, type GenerateConfig, type ParsedResult } from './lib/types';
 
 function saveBlob(blob: Blob, filename: string) {
   const url = URL.createObjectURL(blob);
@@ -27,6 +27,14 @@ export default function App() {
   const [error, setError] = useState('');
   const [generating, setGenerating] = useState(false);
 
+  // 统一生成配置：穿透阈值 / 合并阈值 / 页面尺寸 / 最小字号
+  const generateConfig: GenerateConfig = {
+    penetrationThreshold: settings.threshold,
+    minorShareholderThreshold: settings.mergeRatio,
+    pageSize: settings.pageMode,
+    fontMinSize: DEFAULT_GENERATE_CONFIG.fontMinSize,
+  };
+
   const tree = useMemo(() => {
     if (!parsed) return null;
     try {
@@ -35,7 +43,7 @@ export default function App() {
         parsed.relations,
         parsed.entityTypes ?? {},
         {
-          threshold: settings.threshold,
+          threshold: generateConfig.penetrationThreshold,
           stopAtNaturalPerson: settings.stopNatural,
           stopAtOverseas: settings.stopOverseas,
           showBelowThreshold: settings.showBelowThreshold,
@@ -49,14 +57,14 @@ export default function App() {
       setError(`数据处理失败：${e instanceof Error ? e.message : String(e)}`);
       return null;
     }
-  }, [parsed, settings.threshold, settings.stopNatural, settings.stopOverseas, settings.showBelowThreshold, settings.maxLevel, settings.ratioPrecision]);
+  }, [parsed, generateConfig.penetrationThreshold, settings.stopNatural, settings.stopOverseas, settings.showBelowThreshold, settings.maxLevel, settings.ratioPrecision]);
 
   const fit = useMemo(() => {
     if (!tree) return null;
     try {
       const f = fitLayout(tree, {
-        pageMode: settings.pageMode,
-        mergeRatio: settings.mergeRatio,
+        pageMode: generateConfig.pageSize,
+        mergeRatio: generateConfig.minorShareholderThreshold,
         mergeStartLevel: settings.mergeStartLevel,
         autoMerge: settings.autoMerge,
         showRegPlace: settings.showRegPlace,
@@ -70,7 +78,7 @@ export default function App() {
       setError(`图表生成失败：${e instanceof Error ? e.message : String(e)}`);
       return null;
     }
-  }, [tree, settings.pageMode, settings.mergeRatio, settings.mergeStartLevel, settings.autoMerge, settings.showRegPlace, settings.mergeBelow, settings.ratioPrecision, settings.textLayout]);
+  }, [tree, generateConfig.pageSize, generateConfig.minorShareholderThreshold, settings.mergeStartLevel, settings.autoMerge, settings.showRegPlace, settings.mergeBelow, settings.ratioPrecision, settings.textLayout]);
 
   const layoutCheck = useMemo(() => (fit ? checkLayout(fit.layout) : null), [fit]);
   const svg = useMemo(
@@ -110,7 +118,7 @@ export default function App() {
       const { generatePptx } = await import('./lib/ppt/generatePptx');
       const target = tree.targetName;
       const title = `${target} 股权穿透结构图`;
-      const subtitle = `数据来源：工商股权结构报告 · 穿透阈值 ${settings.threshold}% · 生成时间 ${new Date().toLocaleString('zh-CN')}`;
+      const subtitle = `数据来源：工商股权结构报告 · 穿透阈值 ${generateConfig.penetrationThreshold}% · 生成时间 ${new Date().toLocaleString('zh-CN')}`;
       const blob = (await generatePptx(
         {
           tree: fit.tree,
@@ -119,9 +127,10 @@ export default function App() {
           pxToIn: fit.pxToIn,
           title,
           subtitle,
-          threshold: settings.threshold,
-          mergeRatio: settings.mergeRatio,
+          threshold: generateConfig.penetrationThreshold,
+          mergeRatio: generateConfig.minorShareholderThreshold,
           mergedGroups: fit.mergedGroups,
+          fontMinSize: generateConfig.fontMinSize,
         },
         'blob',
       )) as Blob;
