@@ -12,7 +12,7 @@ export interface SettingsState {
   mergeBelow: boolean;
   ratioPrecision: number;
   textLayout: 'horizontal' | 'vertical' | 'combo';
-  layoutMode: 'bank-standard' | 'minor-shareholders' | 'bank-ownership';
+  layoutMode: 'auto' | 'bank-standard' | 'minor-shareholders' | 'bank-ownership';
 }
 
 interface Props {
@@ -35,7 +35,7 @@ export const DEFAULT_SETTINGS: SettingsState = {
   mergeBelow: false,
   ratioPrecision: 2,
   textLayout: 'horizontal',
-  layoutMode: 'bank-standard',
+  layoutMode: 'auto',
 };
 
 export default function SettingsPanel({ settings, onChange, disabled }: Props) {
@@ -148,6 +148,7 @@ export default function SettingsPanel({ settings, onChange, disabled }: Props) {
             disabled={disabled}
             onChange={(e) => set({ layoutMode: e.target.value as SettingsState['layoutMode'] })}
           >
+            <option value="auto">自动（简单图纵向、复杂图分带）</option>
             <option value="bank-standard">银行标准（突出控制链）</option>
             <option value="minor-shareholders">低比例股东合并显示</option>
             <option value="bank-ownership">银行授信版式（纵向树、独立连线）</option>

@@ -26,6 +26,15 @@ function clampScale(s: number): number {
   return Math.min(MAX_SCALE, s);
 }
 
+/** 自动版式：简单股权结构（节点少、层级浅）用纵向银行授信版式（控股链垂直、境内外虚线齐全）；
+ *  复杂结构用分带式布局，保证密集图可读且不重叠 */
+function resolveLayoutMode(tree: EquityTree, mode?: LayoutMode): LayoutMode {
+  if (mode && mode !== 'auto') return mode;
+  const maxLevel = Math.max(0, ...tree.nodes.map((n) => n.level));
+  const simple = tree.nodes.length <= 5 && maxLevel <= 2;
+  return simple ? 'bank-ownership' : 'bank-standard';
+}
+
 export interface FitOptions {
   pageMode: PageMode;
   mergeRatio: number;
@@ -178,10 +187,11 @@ export function fitLayout(tree: EquityTree, opts: FitOptions): FitResult {
   let mergedGroups = 0;
   const warnings: string[] = [...tree.warnings];
   const minFontScale = (opts.fontMinSize ?? 9) / 720;
+  const layoutMode = resolveLayoutMode(tree, opts.layoutMode);
 
   // 用户选项：生成前直接按阈值归并低比例股东；
   // 布局模式 minor-shareholders 同样强制低比例股东合并显示
-  if (opts.mergeBelow || opts.layoutMode === 'minor-shareholders') {
+  if (opts.mergeBelow || layoutMode === 'minor-shareholders') {
     const res = mergeLowRatio(current, opts.mergeRatio, opts.ratioPrecision, opts.mergeStartLevel ?? 2);
     if (res.merged) {
       current = res.tree;
@@ -197,7 +207,7 @@ export function fitLayout(tree: EquityTree, opts: FitOptions): FitResult {
       ...DEFAULT_LAYOUT_CONFIG,
       showRegPlace: opts.showRegPlace,
       textLayout,
-      layoutMode: opts.layoutMode,
+      layoutMode,
     });
     if (opts.pageMode === 'auto') {
       // 根据节点数量自动选择：A4 放得下且可读（≥9pt）用 A4，否则升 A3；A3 仍不足则触发自动合并
@@ -231,7 +241,7 @@ export function fitLayout(tree: EquityTree, opts: FitOptions): FitResult {
       ...DEFAULT_LAYOUT_CONFIG,
       showRegPlace: opts.showRegPlace,
       textLayout: opts.textLayout ?? 'horizontal',
-      layoutMode: opts.layoutMode,
+      layoutMode,
     });
     chosen = { page, layout, scale: scaleFor(page, layout) };
   }
@@ -246,10 +256,10 @@ export function fitLayout(tree: EquityTree, opts: FitOptions): FitResult {
   const fitScale = scaleFor(page, layout);
   const areaScale = Math.min(clampScale(fitScale) * 0.894, fitScale);
   const s =
-    opts.layoutMode === 'bank-ownership'
+    layoutMode === 'bank-ownership'
       ? Math.min(clampScale(fitScale), fitScale)
       : Math.max(areaScale, minFontScale);
-  if (opts.layoutMode === 'bank-ownership') {
+  if (layoutMode === 'bank-ownership') {
     if (s < minFontScale) {
       warnings.push('银行授信版式内容较密集，已按页面缩放完整放下，字号可能低于 9pt；建议减少股东数量或切换其他版式');
     }

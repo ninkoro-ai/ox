@@ -5,6 +5,7 @@ import { checkLayout } from '../src/lib/layout/collision';
 import { fitLayout, PAGES } from '../src/lib/layout/page';
 import { applySegmentColors } from '../src/lib/layout/layout';
 import { DEFAULT_GENERATE_CONFIG } from '../src/lib/types';
+import { textWidth } from '../src/lib/layout/measure';
 
 const OPTS = {
   threshold: 25,
@@ -19,12 +20,12 @@ function makeTree(relations: EquityRelation[]) {
 }
 
 describe('布局引擎', () => {
-  it('统一生成配置默认值：穿透 25%、合并 5%、页面自动、最小字号 9、银行标准模式', () => {
+  it('统一生成配置默认值：穿透 25%、合并 5%、页面自动、最小字号 9、自动版式', () => {
     expect(DEFAULT_GENERATE_CONFIG.penetrationThreshold).toBe(25);
     expect(DEFAULT_GENERATE_CONFIG.minorShareholderThreshold).toBe(5);
     expect(DEFAULT_GENERATE_CONFIG.pageSize).toBe('auto');
     expect(DEFAULT_GENERATE_CONFIG.fontMinSize).toBe(9);
-    expect(DEFAULT_GENERATE_CONFIG.layoutMode).toBe('bank-standard');
+    expect(DEFAULT_GENERATE_CONFIG.layoutMode).toBe('auto');
   });
 
   it('小树无重叠，优先 A4 紧凑版面', () => {
@@ -290,6 +291,7 @@ describe('布局引擎', () => {
       pageMode: 'auto',
       mergeRatio: 10,
       mergeStartLevel: 1,
+      layoutMode: 'bank-standard',
       autoMerge: false,
       showRegPlace: true,
       mergeBelow: true,
@@ -312,6 +314,7 @@ describe('布局引擎', () => {
       pageMode: 'auto',
       mergeRatio: 10,
       mergeStartLevel: 1,
+      layoutMode: 'bank-standard',
       autoMerge: false,
       showRegPlace: true,
       mergeBelow: true,
@@ -500,6 +503,48 @@ describe('布局引擎', () => {
     });
     const c = fit.tree.nodes.find((n) => n.name === '共享公司C');
     expect(c).toBeDefined(); // 共享主体未被归并删除
+    const report = checkLayout(fit.layout);
+    expect(report.nodeOverlaps).toBe(0);
+    expect(report.segmentNodeHits).toBe(0);
+  });
+
+  it('自动版式：简单图自动用纵向版式——控股链垂直、境内外虚线齐全、注册地不超框', () => {
+    const tree = makeTree([
+      { investor: '江苏沂杉农业科技有限公司', investee: '目标公司', ratio: 53.85 },
+      { investor: '雲杉（中國）控股有限公司', investee: '目标公司', ratio: 46.15 },
+      { investor: '雲杉（中國）投資有限公司', investee: '江苏沂杉农业科技有限公司', ratio: 100 },
+    ]);
+    // 不指定版式：auto → 简单图自动使用纵向银行授信版式
+    const fit = fitLayout(tree, {
+      pageMode: 'auto',
+      mergeRatio: 5,
+      autoMerge: true,
+      showRegPlace: true,
+      mergeBelow: false,
+      ratioPrecision: 2,
+    });
+    // 控股链纵向：雲杉投資 与 江苏沂杉 同列，且位于其上方
+    const target = fit.layout.nodes.find((n) => n.isTarget)!;
+    const jiangsu = fit.layout.nodes.find((n) => n.name.includes('江苏沂杉'))!;
+    const invest = fit.layout.nodes.find((n) => n.name.includes('投資'))!;
+    expect(Math.abs(invest.x + invest.w / 2 - (jiangsu.x + jiangsu.w / 2))).toBeLessThan(1);
+    expect(invest.y).toBeLessThan(jiangsu.y);
+    expect(jiangsu.y).toBeLessThan(target.y);
+    // 境内外虚线存在（境外股东全部在虚线上方）
+    expect(fit.layout.boundary).not.toBeNull();
+    // 目标固定底部
+    expect(target.y).toBe(Math.max(...fit.layout.nodes.map((n) => n.y)));
+    // 注册地文字不超出文本框（按 PPT 同款字号算法估算）
+    for (const n of fit.layout.nodes) {
+      if (!n.regPlace) continue;
+      const regText = `注册地：${n.regPlace}`;
+      const bw = textWidth(regText, 10);
+      const wIn = n.w * fit.pxToIn;
+      const cap = (wIn * 72) / (bw * 10 * 0.0075);
+      const regPt = Math.max(9, Math.min(10 * fit.pxToIn * 72, cap));
+      const needIn = ((bw * regPt) / 10) * 0.75 / 72;
+      expect(needIn).toBeLessThanOrEqual(wIn + 0.01);
+    }
     const report = checkLayout(fit.layout);
     expect(report.nodeOverlaps).toBe(0);
     expect(report.segmentNodeHits).toBe(0);
