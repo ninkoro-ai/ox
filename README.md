@@ -58,6 +58,20 @@ npm test
    - Build output directory：`dist`
 4. 保存并部署。应用为纯静态站点，无服务器、无数据库、无任何后端依赖。
 
+当前线上地址：https://ox.ninkoro.com（Cloudflare Pages 项目 `ox`）。
+
+### 命令行直传部署（不依赖 GitHub 连接）
+
+```bash
+npm install --no-save wrangler@4
+set CLOUDFLARE_API_TOKEN=<token>
+set CLOUDFLARE_ACCOUNT_ID=1f2fcea04028e028fabc64836ae5dd9c
+node scripts/deploy-cloudflare.mjs
+```
+
+若希望每次推送 GitHub 后自动构建部署，可在 Cloudflare 控制台把 `ninkoro-ai/ox`
+仓库连接到该 Pages 项目（构建设置：Vite / `npm run build` / 输出 `dist`）。
+
 ## 技术栈
 
 React + TypeScript + Vite；Excel 解析使用 SheetJS（xlsx）；PPT 生成使用 PptxGenJS；图结构与布局为自实现。
