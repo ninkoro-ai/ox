@@ -481,19 +481,39 @@ export function layoutBankOwnership(
     list.sort((a, b) => (b.ratio ?? -1) - (a.ratio ?? -1) || a.fromId.localeCompare(b.fromId));
   }
 
-  // 槽位宽度：列宽向上递归（父节点行宽 + 间距），保证控股链纵向对齐
+  // 同层节点数量控制：同一被投资企业的股东超过 MAX_PER_ROW（默认 5）个时自动换行，
+  // 每行最多 5 个（行 0 最靠近被投资企业），避免整行过宽导致文本框被压到不可读
+  const parentRowsOf = new Map<string, string[][]>(); // 被投资企业 -> 股东行（每行 fromId 列表）
+  const rowOfParent = new Map<string, Map<string, number>>(); // 被投资企业 -> (股东 fromId -> 行号)
+  for (const n of tree.nodes) {
+    const parents = parentsOf.get(n.id) ?? [];
+    const rows: string[][] = [];
+    for (let i = 0; i < parents.length; i += MAX_PER_ROW) {
+      rows.push(parents.slice(i, i + MAX_PER_ROW).map((p) => p.fromId));
+    }
+    parentRowsOf.set(n.id, rows);
+    const rowIdx = new Map<string, number>();
+    rows.forEach((r, ri) => r.forEach((p) => rowIdx.set(p, ri)));
+    rowOfParent.set(n.id, rowIdx);
+  }
+
+  // 槽位宽度：列宽向上递归（父节点各行最大行宽），保证控股链纵向对齐
   const widthOf = new Map<string, number>();
   const computeW = (id: string): number => {
     const cached = widthOf.get(id);
     if (cached !== undefined) return cached;
-    const parents = parentsOf.get(id) ?? [];
+    const rows = parentRowsOf.get(id) ?? [];
     const w = sizes.get(id)!.w;
-    if (parents.length === 0) {
+    if (rows.length === 0) {
       widthOf.set(id, w);
       return w;
     }
-    const total = parents.reduce((a, p) => a + computeW(p.fromId), 0) + cfg.hGap * (parents.length - 1);
-    const width = Math.max(w, total);
+    let groupW = 0;
+    for (const r of rows) {
+      const rw = r.reduce((a, p) => a + computeW(p), 0) + cfg.hGap * (r.length - 1);
+      groupW = Math.max(groupW, rw);
+    }
+    const width = Math.max(w, groupW);
     widthOf.set(id, width);
     return width;
   };
@@ -504,49 +524,55 @@ export function layoutBankOwnership(
   const slot = new Map<string, { left: number; width: number }>();
   const arrange = (id: string, left: number, width: number) => {
     slot.set(id, { left, width });
-    const parents = parentsOf.get(id) ?? [];
-    if (parents.length === 0) return;
-    const parentW = parents.map((p) => widthOf.get(p.fromId)!);
+    const rows = parentRowsOf.get(id) ?? [];
+    if (rows.length === 0) return;
     const center = left + width / 2;
-    const pos = new Map<string, number>(); // 股东 fromId -> 槽位 left
-    pos.set(parents[0].fromId, center - parentW[0] / 2);
-    let rightEdge = center + parentW[0] / 2 + cfg.hGap;
-    let leftEdge = center - parentW[0] / 2 - cfg.hGap;
-    for (let i = 1; i < parents.length; i++) {
-      const p = parents[i];
-      if (i % 2 === 1) {
-        pos.set(p.fromId, rightEdge);
-        rightEdge += parentW[i] + cfg.hGap;
-      } else {
-        pos.set(p.fromId, leftEdge - parentW[i]);
-        leftEdge -= parentW[i] + cfg.hGap;
+    for (const row of rows) {
+      const rw = row.reduce((a, p) => a + widthOf.get(p)!, 0) + cfg.hGap * (row.length - 1);
+      const pos = new Map<string, number>();
+      pos.set(row[0], center - widthOf.get(row[0])! / 2);
+      let rightEdge = center + widthOf.get(row[0])! / 2 + cfg.hGap;
+      let leftEdge = center - widthOf.get(row[0])! / 2 - cfg.hGap;
+      for (let i = 1; i < row.length; i++) {
+        const p = row[i];
+        const pw = widthOf.get(p)!;
+        if (i % 2 === 1) {
+          pos.set(p, rightEdge);
+          rightEdge += pw + cfg.hGap;
+        } else {
+          pos.set(p, leftEdge - pw);
+          leftEdge -= pw + cfg.hGap;
+        }
       }
-    }
-    for (const p of parents) {
-      arrange(p.fromId, pos.get(p.fromId)!, widthOf.get(p.fromId)!);
+      for (const p of row) arrange(p, pos.get(p)!, widthOf.get(p)!);
     }
   };
   arrange(target.id, 0, totalW);
 
-  // 行高与 y：每层一行（不换行），层级自下而上叠加
-  const levelRowH = levelIds.map((ids) => Math.max(0, ...ids.map((id) => sizes.get(id)!.h)));
-  const levelH = levelRowH.map((h, L) => (levelIds[L].length ? h : 0));
-  const totalH = levelH.reduce((a, b) => a + b, 0) + cfg.rowGap * maxLevel;
-  const yAbs: number[] = [];
-  let top = totalH - levelH[0];
-  yAbs.push(top);
-  for (let l = 1; l <= maxLevel; l++) {
-    top = top - cfg.rowGap - levelH[l];
-    yAbs.push(top);
-  }
-  const shiftY = cfg.margin.top - Math.min(...yAbs);
+  // 纵向位置：从目标（底部）开始，股东行逐级向上堆叠（行 0 最靠近被投资企业）
+  const yOf = new Map<string, number>();
+  const placeY = (id: string, y: number): void => {
+    const prev = yOf.get(id);
+    if (prev === undefined || y < prev) yOf.set(id, y);
+    const rows = parentRowsOf.get(id) ?? [];
+    if (rows.length === 0) return;
+    const rowH = rows.map((r) => Math.max(...r.map((p) => sizes.get(p)!.h)));
+    let cursor = y - cfg.rowGap;
+    rows.forEach((r, ri) => {
+      cursor -= rowH[ri];
+      for (const p of r) placeY(p, cursor);
+      cursor -= ROW_GAP;
+    });
+  };
+  placeY(target.id, 0);
+  const shiftY = cfg.margin.top - Math.min(...yOf.values());
 
   const layoutNodes: LayoutNode[] = [];
   for (const n of tree.nodes) {
     const s = slot.get(n.id)!;
     const size = sizes.get(n.id)!;
     const x = cfg.margin.left + s.left + s.width / 2 - size.w / 2;
-    const y = yAbs[n.level] + shiftY;
+    const y = yOf.get(n.id)! + shiftY;
     layoutNodes.push({
       id: n.id,
       name: n.name,
@@ -596,8 +622,8 @@ export function layoutBankOwnership(
       const f = ordered[0];
       const sx = f.x + f.w / 2;
       const sy = f.y + f.h;
-      // 同层/逆向补充边：从投资方顶边引出，经左侧车道进入被投资企业顶边
-      if (f.y + f.h > to.y + 1) {
+      // 同层/逆向补充边或换行后位于第 1 行及以下的股东：从投资方引出，经左侧车道进入被投资企业
+      if (f.y + f.h > to.y + 1 || (rowOfParent.get(toId)?.get(f.id) ?? 0) > 0) {
         pushLanePath(segments, f, to, nextLane(), sx);
         continue;
       }
@@ -623,20 +649,27 @@ export function layoutBankOwnership(
       continue;
     }
 
-    // 多股东汇聚：各股东竖直下探到同一条共享横线，再经单一入口箭头进入被投资企业
+    // 多股东汇聚：各股东竖直下探到同一条共享横线，再经单一入口箭头进入被投资企业；
+    // 换行后位于第 1 行及以下（或直连穿框）的股东经共享车道接入横线，避免穿过上一行文本框
     const drops: Array<{ f: LayoutNode; sx: number; sy: number }> = [];
+    const laneFroms: LayoutNode[] = [];
     for (const f of ordered) {
-      if (f.y + f.h > to.y + 1) {
-        // 同层/逆向补充边仍走车道
-        pushLanePath(segments, f, to, nextLane(), f.x + f.w / 2);
-        continue;
-      }
       const sx = f.x + f.w / 2;
       const sy = f.y + f.h;
+      if (
+        f.y + f.h > to.y + 1 ||
+        (rowOfParent.get(toId)?.get(f.id) ?? 0) > 0 ||
+        crossesAny(sx, sy, sx, to.y, nodeRects)
+      ) {
+        laneFroms.push(f);
+        continue;
+      }
       drops.push({ f, sx, sy });
     }
-    if (drops.length === 0) continue;
+    if (drops.length === 0 && laneFroms.length === 0) continue;
     const jogY = cy - 18;
+    let minX = Infinity;
+    let maxX = -Infinity;
     for (const d of drops) {
       segments.push({
         x1: d.sx,
@@ -649,14 +682,42 @@ export function layoutBankOwnership(
         kind: 'drop',
         control: d.f.control,
       });
+      minX = Math.min(minX, d.sx);
+      maxX = Math.max(maxX, d.sx);
     }
-    const primary = drops[0].f; // 持股比例最大的股东（已按降序）
-    const minSx = Math.min(...drops.map((d) => d.sx));
-    const maxSx = Math.max(...drops.map((d) => d.sx));
+    if (laneFroms.length > 0) {
+      // 共享车道：所有需绕行的股东先引出到同一条车道，车道竖直段直通共享横线
+      const laneX = nextLane();
+      let laneTop = Infinity;
+      for (const f of laneFroms) {
+        const sx = f.x + f.w / 2;
+        const fromAbove = f.y + f.h <= to.y + 1;
+        const exitY = fromAbove ? f.y + f.h : f.y;
+        const exitDir = fromAbove ? 4 : -4;
+        laneTop = Math.min(laneTop, exitY + exitDir);
+        segments.push({ x1: sx, y1: exitY, x2: sx, y2: exitY + exitDir, arrow: false, edgeId: f.id, toId: to.id, kind: 'drop', control: f.control });
+        segments.push({ x1: sx, y1: exitY + exitDir, x2: laneX, y2: exitY + exitDir, arrow: false, edgeId: f.id, toId: to.id, kind: 'drop', control: f.control });
+      }
+      const primaryLane = ordered[0];
+      segments.push({
+        x1: laneX,
+        y1: laneTop,
+        x2: laneX,
+        y2: jogY,
+        arrow: false,
+        edgeId: primaryLane.id,
+        toId: to.id,
+        kind: 'drop',
+        control: to.control ?? false,
+      });
+      minX = Math.min(minX, laneX);
+      maxX = Math.max(maxX, laneX);
+    }
+    const primary = ordered[0]; // 持股比例最大的股东（已按降序）
     segments.push({
-      x1: minSx,
+      x1: minX,
       y1: jogY,
-      x2: maxSx,
+      x2: maxX,
       y2: jogY,
       arrow: false,
       edgeId: primary.id,
