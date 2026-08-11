@@ -6,5 +6,6 @@ out
 *.old
 *.bak
 vite-dev.*
+.wrangler
 .DS_Store
 *.log
