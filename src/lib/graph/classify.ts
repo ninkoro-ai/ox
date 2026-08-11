@@ -8,8 +8,6 @@ const OVERSEAS_NAME_RE =
 
 const OVERSEAS_TYPE_RE = /外国|境外|外商|外资|港澳台|台港澳/;
 
-const PERSONAL_TYPE_RE = /自然人|个人/;
-
 // 繁体字公司名（如“中國旭陽集團”），默认按境外主体处理
 const TRADITIONAL_CHARS_RE = /[國陽東華萬龍鳳豐發寶億興業來為與長門關開間雙對聖賢廣遠臺澳]/;
 
@@ -21,7 +19,10 @@ function hasAny(s: string, re: RegExp): boolean {
 export function isLikelyNaturalPerson(name: string, entityType?: string | null): boolean {
   const n = (name ?? '').trim();
   if (!n || n === '其他' || n === '无' || n === '未知' || n === '-') return false;
-  if (entityType && hasAny(entityType, PERSONAL_TYPE_RE)) return true;
+  // 企业类型严格匹配“自然人/个人”本身才视为自然人；
+  // “有限责任公司(自然人投资或控股)”等含“自然人”字样的公司类型不在此列
+  const t = (entityType ?? '').trim();
+  if (/^(自然人|个人|自然人股东|个人股东|自然投资人|个人投资者)$/.test(t)) return true;
   // 纯中文 2~4 字且不含企业特征词 → 大概率自然人
   if (/^[\u4e00-\u9fa5]{2,4}$/.test(n)) {
     return !hasAny(n, COMPANY_TOKEN_RE);

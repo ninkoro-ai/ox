@@ -111,6 +111,23 @@ describe('银行授信股权穿透规则', () => {
     expect(t.nodes.find((n) => n.name === '汤玉祥')?.stopReason).toBe('natural-person');
   });
 
+  it('“自然人投资或控股”是公司类型，不作为自然人处理，超过阈值继续穿透', () => {
+    const t = tree([
+      { investor: '探路者控股集团股份有限公司', investee: '目标公司', ratio: 51 },
+      { investor: '北京通域高精尖股权投资中心（有限合伙）', investee: '探路者控股集团股份有限公司', ratio: 7.8 },
+    ]);
+    const tlz = t.nodes.find((n) => n.name === '探路者控股集团股份有限公司')!;
+    expect(tlz.stopReason).toBe('expanded');
+    expect(t.nodes.find((n) => n.name.includes('北京通域'))?.level).toBe(2);
+    const t2 = buildEquityTree(
+      '目标公司',
+      [{ investor: '某股份有限公司', investee: '目标公司', ratio: 60 }],
+      { '某股份有限公司': '股份有限公司(上市、自然人投资或控股)' },
+      OPTS,
+    );
+    expect(t2.nodes.find((n) => n.name === '某股份有限公司')?.stopReason).not.toBe('natural-person');
+  });
+
   it('境外公司停止穿透（香港/BVI/Limited）', () => {
     const cases: Array<[string, string | undefined]> = [
       ['中國旭陽集團（香港）有限公司', '香港'],
