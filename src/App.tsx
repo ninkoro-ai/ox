@@ -36,6 +36,8 @@ export default function App() {
     pageSize: settings.pageMode,
     fontMinSize: DEFAULT_GENERATE_CONFIG.fontMinSize,
     layoutMode: settings.layoutMode,
+    maxShareholdersPerLevel: settings.maxShareholdersPerLevel,
+    capShareholders: settings.capShareholders,
   };
 
   const tree = useMemo(() => {
@@ -70,6 +72,8 @@ export default function App() {
         mergeRatio: generateConfig.minorShareholderThreshold,
         mergeStartLevel: settings.mergeStartLevel,
         layoutMode: generateConfig.layoutMode,
+        maxShareholdersPerLevel: generateConfig.maxShareholdersPerLevel,
+        capShareholders: generateConfig.capShareholders,
         autoMerge: settings.autoMerge,
         showRegPlace: settings.showRegPlace,
         mergeBelow: settings.mergeBelow,
@@ -82,7 +86,7 @@ export default function App() {
       setError(`图表生成失败：${e instanceof Error ? e.message : String(e)}`);
       return null;
     }
-  }, [tree, generateConfig.pageSize, generateConfig.minorShareholderThreshold, generateConfig.layoutMode, settings.mergeStartLevel, settings.autoMerge, settings.showRegPlace, settings.mergeBelow, settings.ratioPrecision, settings.textLayout]);
+  }, [tree, generateConfig.pageSize, generateConfig.minorShareholderThreshold, generateConfig.layoutMode, generateConfig.maxShareholdersPerLevel, generateConfig.capShareholders, settings.mergeStartLevel, settings.autoMerge, settings.showRegPlace, settings.mergeBelow, settings.ratioPrecision, settings.textLayout]);
 
   const layoutCheck = useMemo(() => (fit ? checkLayout(fit.layout) : null), [fit]);
   const svg = useMemo(
@@ -170,10 +174,11 @@ export default function App() {
       mergeStartLevel: 1,
       mergeRatio: Math.min(s.mergeRatio, 10),
       pageMode: 'auto',
-      layoutMode: 'bank-standard',
+      layoutMode: 'bank-ownership',
+      capShareholders: true,
     }));
     setFixNotice(
-      '已自动调整布局参数：开启自动合并、合并起始层级=1、合并阈值≤10%、页面自动、版式=银行标准；如仍有重叠，请尝试减少股东数量或拆分展示',
+      '已自动调整布局参数：开启每层股东归集、自动合并、页面自动、纵向版式；如仍有问题，请尝试调低“每层最多展示股东数”',
     );
   }
 

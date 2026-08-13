@@ -245,6 +245,10 @@ export interface GenerateConfig {
   fontMinSize: number;
   /** 布局模式：bank-standard 突出控制链；minor-shareholders 低比例股东合并显示 */
   layoutMode: LayoutMode;
+  /** 每层最多展示的股东数量（默认 10）：超出部分自动归集为“其他持股不超X%”股东 */
+  maxShareholdersPerLevel: number;
+  /** 是否启用每层股东数量上限归集（默认 true） */
+  capShareholders: boolean;
 }
 
 export const DEFAULT_GENERATE_CONFIG: GenerateConfig = {
@@ -252,5 +256,7 @@ export const DEFAULT_GENERATE_CONFIG: GenerateConfig = {
   minorShareholderThreshold: 5,
   pageSize: 'auto',
   fontMinSize: 9,
-  layoutMode: 'auto',
+  layoutMode: 'bank-ownership',
+  maxShareholdersPerLevel: 10,
+  capShareholders: true,
 };

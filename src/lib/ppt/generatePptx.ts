@@ -84,8 +84,8 @@ export async function generatePptx(
     const baseW = textWidth(text, 10);
     if (baseW <= 0) return toPt(11);
     const maxPt = wIn * 72;
-    // 目标字号 11pt；可读性优先：任何情况下不低于 fontMinSize（默认 9pt）
-    return Math.max(fontMin, Math.min(toPt(11), maxPt / (baseW * 0.075)));
+    // 目标字号 11pt；容量自适应：框内放得下就用目标字号，放不下收缩到刚好放下，保证不超框
+    return Math.min(toPt(11), maxPt / (baseW * 0.075));
   };
   // 公司名称/注册地自适应字号：按文本框实际宽高动态缩放，保证文字不超出文本框
   const fitFont = (lines: string[], wIn: number, hIn: number, desiredPt: number, basePx: number): number => {
@@ -97,7 +97,7 @@ export async function generatePptx(
       }),
     );
     const hLimit = (hIn * 72) / (lines.length * 1.35);
-    return Math.max(fontMin, Math.min(desiredPt, wLimit, hLimit));
+    return Math.min(desiredPt, wLimit, hLimit);
   };
 
   // 水平居中（保留顶部起始位置，简单图表约占半张 A4 版面）

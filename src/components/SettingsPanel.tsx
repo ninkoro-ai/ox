@@ -13,6 +13,8 @@ export interface SettingsState {
   ratioPrecision: number;
   textLayout: 'horizontal' | 'vertical' | 'combo';
   layoutMode: 'auto' | 'bank-standard' | 'minor-shareholders' | 'bank-ownership';
+  maxShareholdersPerLevel: number;
+  capShareholders: boolean;
 }
 
 interface Props {
@@ -35,7 +37,9 @@ export const DEFAULT_SETTINGS: SettingsState = {
   mergeBelow: false,
   ratioPrecision: 2,
   textLayout: 'horizontal',
-  layoutMode: 'auto',
+  layoutMode: 'bank-ownership',
+  maxShareholdersPerLevel: 10,
+  capShareholders: true,
 };
 
 export default function SettingsPanel({ settings, onChange, disabled }: Props) {
@@ -65,30 +69,17 @@ export default function SettingsPanel({ settings, onChange, disabled }: Props) {
           <small>第二层起，持股 ≥ 阈值才继续穿透</small>
         </label>
         <label>
-          合并阈值（%）
-          <input
-            type="number"
-            min={0}
-            max={100}
-            step={5}
-            value={settings.mergeRatio}
-            disabled={disabled}
-            onChange={(e) => set({ mergeRatio: num(e.target.value, 5, 0, 100) })}
-          />
-          <small>持股低于该比例的股东可归并（勾选下方选项）</small>
-        </label>
-        <label>
-          合并起始层级
+          每层最多展示股东数
           <input
             type="number"
             min={1}
-            max={20}
+            max={50}
             step={1}
-            value={settings.mergeStartLevel}
+            value={settings.maxShareholdersPerLevel}
             disabled={disabled}
-            onChange={(e) => set({ mergeStartLevel: num(e.target.value, 2, 1, 20) })}
+            onChange={(e) => set({ maxShareholdersPerLevel: num(e.target.value, 10, 1, 50) })}
           />
-          <small>默认 2：第一层（直接股东）不参与合并，从第 N 层起生效</small>
+          <small>默认每层仅展示前 10 大股东，其余归集</small>
         </label>
         <label>
           持股比例小数位
@@ -141,20 +132,6 @@ export default function SettingsPanel({ settings, onChange, disabled }: Props) {
           </select>
           <small>默认横向；组合模式仅在同层股东较多时生效</small>
         </label>
-        <label>
-          布局模式
-          <select
-            value={settings.layoutMode}
-            disabled={disabled}
-            onChange={(e) => set({ layoutMode: e.target.value as SettingsState['layoutMode'] })}
-          >
-            <option value="auto">自动（简单图纵向、复杂图分带）</option>
-            <option value="bank-standard">银行标准（突出控制链）</option>
-            <option value="minor-shareholders">低比例股东合并显示</option>
-            <option value="bank-ownership">银行授信版式（纵向树、独立连线）</option>
-          </select>
-          <small>银行标准加粗控制链；合并模式自动归并低于合并阈值的股东</small>
-        </label>
       </div>
       <div className="settings-checks">
         <label className="check">
@@ -205,11 +182,11 @@ export default function SettingsPanel({ settings, onChange, disabled }: Props) {
         <label className="check">
           <input
             type="checkbox"
-            checked={settings.mergeBelow}
+            checked={settings.capShareholders}
             disabled={disabled}
-            onChange={(e) => set({ mergeBelow: e.target.checked })}
+            onChange={(e) => set({ capShareholders: e.target.checked })}
           />
-          归并低比例股东为“其他单一持股不超过X%的股东”
+          超出前N大的股东自动归集为“其他持股不超X%的股东”
         </label>
       </div>
     </div>

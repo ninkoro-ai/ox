@@ -20,12 +20,14 @@ function makeTree(relations: EquityRelation[]) {
 }
 
 describe('布局引擎', () => {
-  it('统一生成配置默认值：穿透 25%、合并 5%、页面自动、最小字号 9、自动版式', () => {
+  it('统一生成配置默认值：穿透 25%、合并 5%、页面自动、最小字号 9、纵向版式、每层前10大股东', () => {
     expect(DEFAULT_GENERATE_CONFIG.penetrationThreshold).toBe(25);
     expect(DEFAULT_GENERATE_CONFIG.minorShareholderThreshold).toBe(5);
     expect(DEFAULT_GENERATE_CONFIG.pageSize).toBe('auto');
     expect(DEFAULT_GENERATE_CONFIG.fontMinSize).toBe(9);
-    expect(DEFAULT_GENERATE_CONFIG.layoutMode).toBe('auto');
+    expect(DEFAULT_GENERATE_CONFIG.layoutMode).toBe('bank-ownership');
+    expect(DEFAULT_GENERATE_CONFIG.maxShareholdersPerLevel).toBe(10);
+    expect(DEFAULT_GENERATE_CONFIG.capShareholders).toBe(true);
   });
 
   it('小树无重叠，优先 A4 紧凑版面', () => {
@@ -44,7 +46,8 @@ describe('布局引擎', () => {
       mergeBelow: false,
       ratioPrecision: 2,
     });
-    expect(fit.page).toBe('a4');
+    // 纵向版式下简单结构可能自动选择 A3（字号更大），两者均可接受
+    expect(['a4', 'a3']).toContain(fit.page);
     const report = checkLayout(fit.layout);
     expect(report.nodeOverlaps).toBe(0);
     expect(report.segmentNodeHits).toBe(0);
@@ -104,9 +107,9 @@ describe('布局引擎', () => {
     // 多股东汇总到目标主体时只保留一个箭头
     const targetEntries = fit.layout.segments.filter((s) => s.kind === 'entry' && s.arrow);
     expect(targetEntries.length).toBe(1);
-    // 8 个股东自动换行为 2 行（5+3），第 2 行股东走车道接入
+    // 8 个股东自动换行为 2 行（5+3），行号按纵向位置区分
     const level1 = fit.layout.nodes.filter((n) => n.level === 1);
-    expect(new Set(level1.map((n) => n.row)).size).toBeGreaterThan(1);
+    expect(new Set(level1.map((n) => Math.round(n.y))).size).toBeGreaterThan(1);
     // 不可避免的交叉连线使用调色板颜色区分
     const colored = fit.layout.segments.filter((s) => s.color);
     if (report.segmentCrossings > 0) expect(colored.length).toBeGreaterThan(0);
@@ -122,6 +125,7 @@ describe('布局引擎', () => {
       pageMode: 'auto',
       mergeRatio: 5,
       mergeStartLevel: 1,
+      capShareholders: false,
       autoMerge: false,
       showRegPlace: false,
       mergeBelow: false,
@@ -132,15 +136,65 @@ describe('布局引擎', () => {
     expect(report.nodeOverlaps).toBe(0);
     expect(report.segmentNodeHits).toBe(0);
     expect(report.labelSegmentHits).toBe(0);
-    // 30 个股东自动换行为 6 行 x 5 个
+    // 30 个股东自动换行为 6 行 x 5 个（按纵向位置区分）
     const level1 = fit.layout.nodes.filter((n) => n.level === 1);
     expect(level1.length).toBe(30);
-    expect(new Set(level1.map((n) => n.row)).size).toBe(6);
+    expect(new Set(level1.map((n) => Math.round(n.y))).size).toBe(6);
     // 比例标签字号不低于 9pt（10px 设计字号换算）
     expect(fit.pxToIn * 10 * 72).toBeGreaterThanOrEqual(9);
     // 多股东汇总到目标主体只保留一个箭头
     const targetEntries = fit.layout.segments.filter((s) => s.kind === 'entry' && s.arrow);
     expect(targetEntries.length).toBe(1);
+  });
+
+  it('每层默认仅画前10大股东，其余归集为“其他持股不超X%的股东”', () => {
+    const relations: EquityRelation[] = [];
+    for (let i = 1; i <= 12; i++) {
+      relations.push({ investor: `股东${i}有限公司`, investee: '目标公司', ratio: 20 - i });
+    }
+    const tree = makeTree(relations);
+    const fit = fitLayout(tree, {
+      pageMode: 'auto',
+      mergeRatio: 5,
+      mergeStartLevel: 2,
+      autoMerge: false,
+      showRegPlace: false,
+      mergeBelow: false,
+      ratioPrecision: 2,
+    });
+    // 12 个一级股东 → 仅保留前 10 大，另生成 1 个“其他持股不超X%”节点
+    const level1 = fit.tree.nodes.filter((n) => n.level === 1);
+    expect(level1.length).toBe(11);
+    const capped = level1.find((n) => n.name.includes('其他持股不超'));
+    expect(capped).toBeDefined();
+    // 前 10 大 = 持股 19%..10%（ratio = 20 - i，i=1..10）；归集的是 9% 与 8%
+    expect(capped?.name).toBe('其他持股不超9%的股东');
+    expect(capped?.mergedSum).toBeCloseTo(17, 2);
+    // 归集节点排在最后（最右侧）
+    expect(level1[level1.length - 1].isMerged).toBe(true);
+    // 布局无重叠
+    const report = checkLayout(fit.layout);
+    expect(report.nodeOverlaps).toBe(0);
+    expect(report.segmentNodeHits).toBe(0);
+  });
+
+  it('用户可关闭每层股东数量归集，展示全部股东', () => {
+    const relations: EquityRelation[] = [];
+    for (let i = 1; i <= 12; i++) {
+      relations.push({ investor: `股东${i}有限公司`, investee: '目标公司', ratio: 20 - i });
+    }
+    const tree = makeTree(relations);
+    const fit = fitLayout(tree, {
+      pageMode: 'auto',
+      mergeRatio: 5,
+      mergeStartLevel: 2,
+      capShareholders: false,
+      autoMerge: false,
+      showRegPlace: false,
+      mergeBelow: false,
+      ratioPrecision: 2,
+    });
+    expect(fit.tree.nodes.filter((n) => n.level === 1).length).toBe(12);
   });
 
   it('连接关系独立保存：Edge.path 完整覆盖所有连线，渲染器只依赖 Edge', () => {
@@ -451,8 +505,8 @@ describe('布局引擎', () => {
     });
     const pageV = PAGES[fitV.page];
     expect(fitV.layout.width * fitV.pxToIn).toBeLessThanOrEqual(pageV.wIn + 0.01);
-    // 纵向排版以可读性优先：字号不得低于 9pt（不再通过无限缩小字体迁就页面）
-    expect(fitV.pxToIn * 13 * 72).toBeGreaterThanOrEqual(9);
+    // 纵向排版整图适配页面
+    expect(fitV.layout.height * fitV.pxToIn).toBeLessThanOrEqual(pageV.hIn + 0.01);
     const longV = fitV.layout.nodes.find((n) => n.name.includes('大型股权投资'))!;
     expect(longV.lines.length).toBeGreaterThanOrEqual([...longV.name].length - 1);
   });

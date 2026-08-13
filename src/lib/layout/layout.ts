@@ -456,17 +456,27 @@ export function layoutBankOwnership(
   const regOf = (n: TreeNode) => (showRegPlace && !vertOf(n) ? n.regPlace : undefined);
   const sizes = new Map<string, { w: number; h: number; lines: string[] }>();
   for (const n of tree.nodes) sizes.set(n.id, nodeSize(n.name, regOf(n), n.tag));
-  if (textLayout === 'vertical') {
+  if (textLayout === 'vertical' || textLayout === 'combo') {
     for (const ids of levelIds) {
-      const targetW = Math.min(Math.max(...ids.map((id) => sizes.get(id)!.w)), VERTICAL_NAME_W);
-      const remeasured = ids.map((id) => {
-        const n = nodeOf.get(id)!;
-        return nodeSizeForWidth(n.name, undefined, n.tag, targetW);
+      const many = ids.length >= MANY_SHAREHOLDERS;
+      const hasSmall = ids.some((id) => {
+        const r = nodeOf.get(id)!.ratio;
+        return r !== null && r < SMALL_RATIO;
       });
-      const targetH = Math.max(...remeasured.map((s) => s.h));
-      ids.forEach((id, i) => {
-        sizes.set(id, { ...remeasured[i], h: Math.max(remeasured[i].h, targetH) });
-      });
+      const combo = textLayout === 'combo' && many && hasSmall;
+      if (textLayout === 'vertical' || combo) {
+        const targetW = Math.min(Math.max(...ids.map((id) => sizes.get(id)!.w)), VERTICAL_NAME_W);
+        const remeasured = ids.map((id) => {
+          const n = nodeOf.get(id)!;
+          // 组合模式：仅持股 <5% 的小股东纵向，其余保持横向
+          if (textLayout === 'combo' && !(n.ratio !== null && n.ratio < SMALL_RATIO)) return sizes.get(id)!;
+          return nodeSizeForWidth(n.name, undefined, n.tag, targetW);
+        });
+        const targetH = Math.max(...remeasured.map((s) => s.h));
+        ids.forEach((id, i) => {
+          sizes.set(id, { ...remeasured[i], h: Math.max(remeasured[i].h, targetH) });
+        });
+      }
     }
   }
 
@@ -523,6 +533,8 @@ export function layoutBankOwnership(
   // 定位：目标底部中央，股东逐级向上；同层股东最大者居中、其余按比例降序左右交替展开
   const slot = new Map<string, { left: number; width: number }>();
   const arrange = (id: string, left: number, width: number) => {
+    // 多路径共享主体只定位一次，避免同一主体被不同分支重复放置导致重叠
+    if (slot.has(id)) return;
     slot.set(id, { left, width });
     const rows = parentRowsOf.get(id) ?? [];
     if (rows.length === 0) return;
@@ -553,7 +565,8 @@ export function layoutBankOwnership(
   const yOf = new Map<string, number>();
   const placeY = (id: string, y: number): void => {
     const prev = yOf.get(id);
-    if (prev === undefined || y < prev) yOf.set(id, y);
+    if (prev !== undefined) return; // 多路径共享主体只定一次纵向位置
+    yOf.set(id, y);
     const rows = parentRowsOf.get(id) ?? [];
     if (rows.length === 0) return;
     const rowH = rows.map((r) => Math.max(...r.map((p) => sizes.get(p)!.h)));
@@ -627,8 +640,13 @@ export function layoutBankOwnership(
         pushLanePath(segments, f, to, nextLane(), sx);
         continue;
       }
-      // 落点在被投资企业上边沿内且不穿框时直连，否则做单条局部短折
-      if (sx > to.x + 1 && sx < to.x + to.w - 1 && !crossesAny(sx, sy, sx, cy, nodeRects)) {
+      const jogY = cy - 18;
+      // 直连：落点在被投资企业上边沿内，且整段（sy→to.y）不穿框
+      if (
+        sx > to.x + 1 &&
+        sx < to.x + to.w - 1 &&
+        !crossesAny(sx, sy, sx, cy, nodeRects)
+      ) {
         segments.push({
           x1: sx,
           y1: sy,
@@ -642,15 +660,23 @@ export function layoutBankOwnership(
         });
         continue;
       }
-      const jogY = cy - 18;
+      // 局部短折：竖直段（sy→jogY）与水平段（sx→cx，在 jogY）均不穿框
+      if (
+        !crossesAny(sx, sy, sx, jogY, nodeRects) &&
+        !crossesAny(sx, jogY, cx, jogY, nodeRects)
+      ) {
       segments.push({ x1: sx, y1: sy, x2: sx, y2: jogY, arrow: false, edgeId: f.id, toId: to.id, kind: 'drop', control: f.control });
       segments.push({ x1: sx, y1: jogY, x2: cx, y2: jogY, arrow: false, edgeId: f.id, toId: to.id, kind: 'drop', control: f.control });
       segments.push({ x1: cx, y1: jogY, x2: cx, y2: cy, arrow: true, edgeId: f.id, toId: to.id, kind: 'entry', control: f.control });
+      } else {
+        pushLanePath(segments, f, to, nextLane(), sx);
+      }
       continue;
     }
 
     // 多股东汇聚：各股东竖直下探到同一条共享横线，再经单一入口箭头进入被投资企业；
     // 换行后位于第 1 行及以下（或直连穿框）的股东经共享车道接入横线，避免穿过上一行文本框
+    const jogY = cy - 18;
     const drops: Array<{ f: LayoutNode; sx: number; sy: number }> = [];
     const laneFroms: LayoutNode[] = [];
     for (const f of ordered) {
@@ -659,7 +685,7 @@ export function layoutBankOwnership(
       if (
         f.y + f.h > to.y + 1 ||
         (rowOfParent.get(toId)?.get(f.id) ?? 0) > 0 ||
-        crossesAny(sx, sy, sx, to.y, nodeRects)
+        crossesAny(sx, sy, sx, jogY, nodeRects)
       ) {
         laneFroms.push(f);
         continue;
@@ -667,7 +693,6 @@ export function layoutBankOwnership(
       drops.push({ f, sx, sy });
     }
     if (drops.length === 0 && laneFroms.length === 0) continue;
-    const jogY = cy - 18;
     let minX = Infinity;
     let maxX = -Infinity;
     for (const d of drops) {
@@ -777,13 +802,13 @@ export function layoutBankOwnership(
     if (splitApplied) {
       return layoutBankOwnership(tree, { ...cfg, zoneSplit: false }, depth + 1);
     }
-    if (depth < 3) {
+    if (depth < 4) {
       return layoutBankOwnership(
         tree,
         {
           ...cfg,
-          hGap: cfg.hGap + 24,
-          rowGap: cfg.rowGap + 32,
+          hGap: cfg.hGap + 40,
+          rowGap: cfg.rowGap + 48,
         },
         depth + 1,
       );
@@ -990,8 +1015,8 @@ export function attachRatioLabels(
       const sides: RatioLabelSide[] =
         sideMode === 'right' ? ['right'] : [preferred, preferred === 'left' ? 'right' : 'left'];
       for (const side of sides) {
-        for (const dy of [0, -10, 10, -20, 20, -30, 30]) {
-          for (const gap of [LABEL_GAP, LABEL_GAP + 8, LABEL_GAP + 16, LABEL_GAP + 26]) {
+        for (const dy of [0, -10, 10, -20, 20, -32, 32, -44, 44, -58, 58, -72, 72]) {
+          for (const gap of [LABEL_GAP, LABEL_GAP + 8, LABEL_GAP + 16, LABEL_GAP + 26, LABEL_GAP + 38, LABEL_GAP + 52, LABEL_GAP + 66]) {
             placements.push({ side, dy, gap });
           }
         }

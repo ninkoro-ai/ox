@@ -26,13 +26,10 @@ function clampScale(s: number): number {
   return Math.min(MAX_SCALE, s);
 }
 
-/** 自动版式：简单股权结构（节点少、层级浅）用纵向银行授信版式（控股链垂直、境内外虚线齐全）；
- *  复杂结构用分带式布局，保证密集图可读且不重叠 */
+/** 版式解析：产品仅保留纵向银行授信版式（控股链垂直、境内外虚线齐全） */
 function resolveLayoutMode(tree: EquityTree, mode?: LayoutMode): LayoutMode {
   if (mode && mode !== 'auto') return mode;
-  const maxLevel = Math.max(0, ...tree.nodes.map((n) => n.level));
-  const simple = tree.nodes.length <= 5 && maxLevel <= 2;
-  return simple ? 'bank-ownership' : 'bank-standard';
+  return 'bank-ownership';
 }
 
 export interface FitOptions {
@@ -42,6 +39,10 @@ export interface FitOptions {
   mergeStartLevel?: number;
   /** 布局模式：bank-standard 突出控制链；minor-shareholders 低比例股东合并显示 */
   layoutMode?: LayoutMode;
+  /** 每层最多展示的股东数量（默认 10）：超出部分归集为“其他持股不超X%”股东 */
+  maxShareholdersPerLevel?: number;
+  /** 是否启用每层股东数量上限归集（默认 true） */
+  capShareholders?: boolean;
   /** 最小字号（pt）：默认 9，禁止无限缩小字体 */
   fontMinSize?: number;
   autoMerge: boolean;
@@ -98,6 +99,7 @@ export function mergeLowRatio(
     for (const c of n.children) parentCount.set(c, (parentCount.get(c) ?? 0) + 1);
   }
   const removed = new Set<string>();
+  const createdMerged = new Set<string>();
   const collectSubtree = (id: string) => {
     const n = byId.get(id);
     if (!n) return;
@@ -115,6 +117,7 @@ export function mergeLowRatio(
     const mergeable = kids.filter(
       (k) =>
         !k.isTarget &&
+        k.stopReason !== 'merged' &&
         k.level >= mergeStartLevel &&
         (k.ratio === null || (k.ratio < mergeRatio && k.children.length === 0)) &&
         (parentCount.get(k.id) ?? 0) === 1,
@@ -143,6 +146,7 @@ export function mergeLowRatio(
     };
     nodes.push(mergedNode);
     byId.set(mId, mergedNode);
+    createdMerged.add(mId);
     for (const k of mergeable) collectSubtree(k.id);
     n.children = [mId, ...keep.map((k) => k.id)];
     // 合并股东统一在最右侧，其余按持股比例从大到小（左→右）
@@ -160,7 +164,7 @@ export function mergeLowRatio(
   const edges: TreeEdge[] = [];
   // 合并节点到其父节点的边
   for (const n of finalNodes) {
-    if (n.isMerged && n.parentId && finalIds.has(n.parentId)) {
+    if (createdMerged.has(n.id) && n.parentId && finalIds.has(n.parentId)) {
       edges.push({ fromId: n.id, toId: n.parentId, ratio: n.ratio, label: n.ratioText });
     }
   }
@@ -182,12 +186,98 @@ export function mergeLowRatio(
   };
 }
 
+/**
+ * 每层股东数量上限：对每一层（每个被投资企业）仅保留持股比例最大的前 maxN 名股东，
+ * 其余股东归集为一个“其他持股不超X%的股东”节点，避免页面混乱。
+ */
+export function capTopShareholders(
+  tree: EquityTree,
+  maxN: number,
+  precision = 2,
+): { tree: EquityTree; merged: boolean; groups: number } {
+  let groups = 0;
+  const nodes: TreeNode[] = tree.nodes.map((n) => ({ ...n, children: [...n.children] }));
+  const byId = new Map(nodes.map((n) => [n.id, n]));
+  const removed = new Set<string>();
+  const createdCapped = new Set<string>();
+  const originalIds = tree.nodes.map((n) => n.id);
+  for (const id of originalIds) {
+    const n = byId.get(id)!;
+    if (removed.has(id)) continue;
+    const kids = n.children
+      .map((k) => byId.get(k))
+      .filter((k): k is TreeNode => k !== undefined && !removed.has(k.id));
+    if (kids.length <= maxN) continue;
+    // 按持股比例降序（比例不详排最后），保留前 maxN
+    const sorted = [...kids].sort((a, b) => (b.ratio ?? -1) - (a.ratio ?? -1));
+    const keep = sorted.slice(0, maxN);
+    const merged = sorted.slice(maxN);
+    const knownMax = Math.max(0, ...merged.map((k) => k.ratio ?? 0));
+    const knownSum = merged.reduce((s, k) => s + (k.ratio ?? 0), 0);
+    const mId = `capped-${id}-${maxN}-${groups}`;
+    const capNode: TreeNode = {
+      id: mId,
+      name: knownMax > 0 ? `其他持股不超${Math.ceil(knownMax)}%的股东` : '其他股东',
+      parentId: id,
+      level: n.level + 1,
+      ratio: null,
+      ratioText: `合计${formatNum(knownSum, precision)}%`,
+      stopReason: 'merged',
+      children: [],
+      isTarget: false,
+      isMerged: true,
+      mergedCount: merged.length,
+      mergedSum: knownSum,
+      control: false,
+    };
+    nodes.push(capNode);
+    byId.set(mId, capNode);
+    createdCapped.add(mId);
+    for (const k of merged) removed.add(k.id);
+    n.children = [...keep.map((k) => k.id), mId];
+    groups++;
+  }
+  const finalNodes = nodes.filter((n) => !removed.has(n.id));
+  const finalIds = new Set(finalNodes.map((n) => n.id));
+  const edges: TreeEdge[] = [];
+  for (const n of finalNodes) {
+    if (createdCapped.has(n.id) && n.parentId && finalIds.has(n.parentId)) {
+      edges.push({ fromId: n.id, toId: n.parentId, ratio: n.ratio, label: n.ratioText });
+    }
+  }
+  for (const e of tree.edges) {
+    if (finalIds.has(e.fromId) && finalIds.has(e.toId)) edges.push(e);
+  }
+  const merged = groups > 0;
+  return {
+    tree: {
+      ...tree,
+      nodes: finalNodes,
+      edges,
+      stats: recomputeStats(finalNodes, edges, tree.stats.totalRelations),
+      warnings: merged ? [...tree.warnings, `已按每层最多 ${maxN} 名股东归集其余股东`] : tree.warnings,
+    },
+    merged,
+    groups,
+  };
+}
+
 export function fitLayout(tree: EquityTree, opts: FitOptions): FitResult {
   let current = tree;
   let mergedGroups = 0;
   const warnings: string[] = [...tree.warnings];
   const minFontScale = (opts.fontMinSize ?? 9) / 720;
   const layoutMode = resolveLayoutMode(tree, opts.layoutMode);
+
+  // 每层股东数量上限（默认开启）：仅保留前 maxShareholdersPerLevel 名，其余归集为“其他持股不超X%”股东
+  const maxN = opts.maxShareholdersPerLevel ?? 10;
+  if (opts.capShareholders !== false && maxN > 0) {
+    const res = capTopShareholders(current, maxN, opts.ratioPrecision);
+    if (res.merged) {
+      current = res.tree;
+      mergedGroups += res.groups;
+    }
+  }
 
   // 用户选项：生成前直接按阈值归并低比例股东；
   // 布局模式 minor-shareholders 同样强制低比例股东合并显示
@@ -250,21 +340,12 @@ export function fitLayout(tree: EquityTree, opts: FitOptions): FitResult {
   // 页面紧凑时由标签布局自动缩小字号并加大间距，确保不遮挡股权线
   const layout = attachRatioLabels(chosen.layout, 'both');
   const page = chosen.page;
-  // 最终缩放：
-  // - 常规模式：图表约占页面 4/5（线性约 89.4%），可读性优先——字号不得低于 fontMinSize；
-  // - 银行授信版式：整图适配页面（优先 A4、空间不足自动 A3），放不下时按页面缩放并提示
+  // 最终缩放：整图始终适配页面（优先 A4、空间不足自动 A3）；内容过密时按页面缩放并提示，
+  // 不再通过强制 9pt 下限把内容挤出页面
   const fitScale = scaleFor(page, layout);
-  const areaScale = Math.min(clampScale(fitScale) * 0.894, fitScale);
-  const s =
-    layoutMode === 'bank-ownership'
-      ? Math.min(clampScale(fitScale), fitScale)
-      : Math.max(areaScale, minFontScale);
-  if (layoutMode === 'bank-ownership') {
-    if (s < minFontScale) {
-      warnings.push('银行授信版式内容较密集，已按页面缩放完整放下，字号可能低于 9pt；建议减少股东数量或切换其他版式');
-    }
-  } else if (fitScale < minFontScale) {
-    warnings.push(`内容较多，图表在 ${page.toUpperCase()} 上无法按 ${opts.fontMinSize ?? 9}pt 字号完整放下；已保持最小字号，建议减少股东数量或开启低比例合并/拆分展示`);
+  const s = Math.min(clampScale(fitScale), fitScale);
+  if (s < minFontScale) {
+    warnings.push('内容较多，已按页面缩放完整放下，字号可能低于 9pt；建议开启“每层最多展示前N大股东”归集或减少股东数量');
   }
   return {
     tree: current,
